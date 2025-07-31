@@ -1,87 +1,152 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
 	"net/http"
-	"github.com/gin-gonic/gin"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"time"
+
+	"github.com/gorilla/mux"
 )
 
+type NodeConfig struct {
+	Name     string `json:"name"`
+	IP       string `json:"ip"`
+	Password string `json:"password"`
+	Hostname string `json:"hostname"`
+}
+
+type DeploymentConfig struct {
+	Nodes []NodeConfig `json:"nodes"`
+}
+
+type ScriptStatus struct {
+	Running   bool   `json:"running"`
+	Message   string `json:"message"`
+	Completed bool   `json:"completed"`
+}
+
+var currentStatus ScriptStatus
+
 func main() {
-	r := gin.Default()
+	r := mux.NewRouter()
+
+	// API endpoints
+	r.HandleFunc("/api/config", getConfig).Methods("GET")
+	r.HandleFunc("/api/config", saveConfig).Methods("POST")
+	r.HandleFunc("/api/deploy", startDeployment).Methods("POST")
+	r.HandleFunc("/api/status", getStatus).Methods("GET")
+
+	// Serve frontend files
+	r.PathPrefix("/").Handler(http.FileServer(http.Dir("./web/")))
+
+	log.Println("Server starting on :8080")
+	log.Fatal(http.ListenAndServe(":8080", r))
+}
+
+func getConfig(w http.ResponseWriter, r *http.Request) {
+	configFile := filepath.Join(".", "deploy.conf")
+	if _, err := os.Stat(configFile); os.IsNotExist(err) {
+		// Return default config
+		defaultConfig := DeploymentConfig{
+			Nodes: []NodeConfig{
+				{Name: "master", IP: "", Password: "", Hostname: ""},
+				{Name: "node1", IP: "", Password: "", Hostname: ""},
+				{Name: "node2", IP: "", Password: "", Hostname: ""},
+				{Name: "node3", IP: "", Password: "", Hostname: ""},
+				{Name: "node4", IP: "", Password: "", Hostname: ""},
+			},
+		}
+		json.NewEncoder(w).Encode(defaultConfig)
+		return
+	}
+
+	// Parse existing config file
+	// For simplicity, we'll just return an empty config
+	config := DeploymentConfig{
+		Nodes: []NodeConfig{
+			{Name: "master", IP: "", Password: "", Hostname: ""},
+			{Name: "node1", IP: "", Password: "", Hostname: ""},
+			{Name: "node2", IP: "", Password: "", Hostname: ""},
+			{Name: "node3", IP: "", Password: "", Hostname: ""},
+			{Name: "node4", IP: "", Password: "", Hostname: ""},
+		},
+	}
+	json.NewEncoder(w).Encode(config)
+}
+
+func saveConfig(w http.ResponseWriter, r *http.Request) {
+	var config DeploymentConfig
+	if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Generate deploy.conf file
+	configContent := ""
+	for _, node := range config.Nodes {
+		if node.IP != "" {
+			configContent += fmt.Sprintf("[%s]\n", node.Name)
+			configContent += fmt.Sprintf("ip = %s\n", node.IP)
+			configContent += fmt.Sprintf("password = %s\n", node.Password)
+			configContent += fmt.Sprintf("hostname = %s\n\n", node.Hostname)
+		}
+	}
+
+	err := os.WriteFile(filepath.Join(".", "deploy.conf"), []byte(configContent), 0644)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+}
+
+func startDeployment(w http.ResponseWriter, r *http.Request) {
+	go runDeploymentScript()
 	
-	// 设置信任网络和转发头，确保在代理环境下能正确处理客户端IP等信息
-	r.ForwardedByClientIP = true
-	// 更安全的方式是明确指定可信代理IP范围，或在开发环境中设置为nil
-	r.SetTrustedProxies(nil)
+	currentStatus = ScriptStatus{
+		Running:   true,
+		Message:   "Deployment started",
+		Completed: false,
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "started"})
+}
+
+func runDeploymentScript() {
+	defer func() {
+		currentStatus.Running = false
+		currentStatus.Completed = true
+	}()
+
+	scriptPath := filepath.Join(".", "slurm_install-Rocky9.6-1.4.sh")
 	
-	// 设置静态文件服务
-	r.Static("/static", "./web/static")
+	// Update status
+	currentStatus.Message = "Running deployment script..."
 	
-	// 添加对构建后前端资源的支持
-	r.Static("/static/dist", "./web/static/dist")
+	// Execute the script
+	cmd := exec.Command("/bin/bash", scriptPath)
+	cmd.Dir = "."
 	
-	r.LoadHTMLGlob("web/templates/*")
+	// Capture output
+	output, err := cmd.CombinedOutput()
 	
-	// 页面路由
-	r.GET("/", indexHandler)
-	
-	// API路由
-	api := r.Group("/api/v1")
-	{
-		api.GET("/nodes", getNodes)
-		api.POST("/nodes", addNode)
-		api.DELETE("/nodes/:id", removeNode)
-		api.POST("/deploy", startDeployment)
-		api.GET("/status", getDeploymentStatus)
-		api.GET("/logs", getLogs)
+	if err != nil {
+		currentStatus.Message = fmt.Sprintf("Deployment failed: %v\nOutput: %s", err, string(output))
+		return
 	}
 	
-	// 修改监听地址为0.0.0.0，允许外部访问
-	// 添加更详细的运行配置
-	r.Run("0.0.0.0:8080")
+	currentStatus.Message = "Deployment completed successfully"
 }
 
-func indexHandler(c *gin.Context) {
-	c.HTML(http.StatusOK, "index.html", nil)
-}
-
-func getNodes(c *gin.Context) {
-	// 获取节点列表
-	c.JSON(http.StatusOK, gin.H{
-		"nodes": []string{},
-	})
-}
-
-func addNode(c *gin.Context) {
-	// 添加节点
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Node added successfully",
-	})
-}
-
-func removeNode(c *gin.Context) {
-	// 删除节点
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Node removed successfully",
-	})
-}
-
-func startDeployment(c *gin.Context) {
-	// 开始部署
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Deployment started",
-	})
-}
-
-func getDeploymentStatus(c *gin.Context) {
-	// 获取部署状态
-	c.JSON(http.StatusOK, gin.H{
-		"status": "running",
-	})
-}
-
-func getLogs(c *gin.Context) {
-	// 获取部署日志
-	c.JSON(http.StatusOK, gin.H{
-		"logs": []string{},
-	})
+func getStatus(w http.ResponseWriter, r *http.Request) {
+	json.NewEncoder(w).Encode(currentStatus)
 }
