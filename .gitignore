@@ -1,0 +1,20 @@
+# Vue
+frontend/node_modules/
+frontend/dist/
+*.log
+
+# Go
+*.exe
+*.out
+/tmp/
+/bin/
+/vendor/
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+
+# 系统文件
+.DS_Store
+Thumbs.db
