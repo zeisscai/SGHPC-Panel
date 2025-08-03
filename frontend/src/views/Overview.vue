@@ -14,7 +14,7 @@
       <v-col cols="12">
         <v-card class="mb-6" elevation="2" transition="slide-y-transition">
           <v-card-title>
-            <v-icon left class="mr-2">mdi-server</v-icon>
+            <v-icon left class="mr-2 overview-icon">mdi-server</v-icon>
             Management Node Information
           </v-card-title>
           <v-card-text>
@@ -63,7 +63,7 @@
       <v-col cols="12">
         <v-card class="mb-6" elevation="2" transition="slide-y-transition">
           <v-card-title>
-            <v-icon left class="mr-2">mdi-server-network</v-icon>
+            <v-icon left class="mr-2 overview-icon">mdi-server-network</v-icon>
             Compute Nodes
           </v-card-title>
           <v-card-text>
@@ -108,7 +108,7 @@
       <v-col cols="12">
         <v-card class="mb-6" elevation="2" transition="slide-y-transition">
           <v-card-title>
-            <v-icon left class="mr-2">mdi-format-list-bulleted</v-icon>
+            <v-icon left class="mr-2 overview-icon">mdi-format-list-bulleted</v-icon>
             SLURM Jobs
           </v-card-title>
           <v-card-text>
@@ -253,6 +253,10 @@ export default {
 </script>
 
 <style scoped>
+.overview-icon {
+  background-color: transparent !important;
+}
+
 .v-card {
   transition: transform 0.3s ease, box-shadow 0.3s ease;
 }

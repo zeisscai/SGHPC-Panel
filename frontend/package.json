@@ -1,7 +1,7 @@
 {
   "name": "frontend",
   "version": "1.0.0",
-  "description": "HPC Control Panel Frontend",
+  "description": "SGHPC Panel Frontend",
   "main": "index.js",
   "scripts": {
     "serve": "vue-cli-service serve",

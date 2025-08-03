@@ -4,7 +4,7 @@
       <v-col cols="12" sm="8" md="6" lg="4">
         <v-card class="elevation-12">
           <v-toolbar color="primary" dark flat>
-            <v-toolbar-title>HPC Control Panel Login</v-toolbar-title>
+            <v-toolbar-title>SGHPC Panel Login</v-toolbar-title>
           </v-toolbar>
           <v-card-text>
             <v-alert
@@ -37,14 +37,20 @@
                 :rules="passwordRules"
                 required
               ></v-text-field>
+              
+              <v-checkbox
+                v-model="rememberMe"
+                label="Remember me"
+                class="mt-2"
+              ></v-checkbox>
             </v-form>
           </v-card-text>
-          <v-card-actions>
+          <v-card-actions class="pa-6">
             <v-spacer></v-spacer>
             <v-btn 
               color="primary" 
-              @click="login" 
-              :disabled="!valid || loading"
+              @click="login"
+              :disabled="!valid"
               :loading="loading"
             >
               Login
@@ -59,7 +65,7 @@
 <script>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { login } from '@/api/node'
+import axios from 'axios'
 
 export default {
   name: 'Login',
@@ -69,61 +75,74 @@ export default {
     const loading = ref(false)
     const username = ref('')
     const password = ref('')
-
+    const rememberMe = ref(false)
+    
     const usernameRules = [
-      v => !!v || 'Username is required',
-      v => v.length >= 3 || 'Username must be at least 3 characters'
+      v => !!v || 'Username is required'
     ]
-
+    
     const passwordRules = [
-      v => !!v || 'Password is required',
-      v => v.length >= 6 || 'Password must be at least 6 characters'
+      v => !!v || 'Password is required'
     ]
-
-    const loginHandler = async () => {
+    
+    const login = async () => {
       if (!valid.value) return
       
       loading.value = true
       
       try {
-        const data = await login(username.value, password.value)
+        // 发送登录请求到后端
+        const response = await axios.post('/api/login', {
+          username: username.value,
+          password: password.value
+        })
         
-        // 保存认证信息到localStorage
-        localStorage.setItem('authToken', data.token)
-        localStorage.setItem('user', JSON.stringify(data.user))
+        // 保存认证信息
+        const { token, user } = response.data
+        localStorage.setItem('authToken', token)
+        localStorage.setItem('user', JSON.stringify(user))
         localStorage.setItem('lastActivity', Date.now().toString())
         
-        // 检查是否使用默认密码
-        if (data.is_default_password) {
-          // 设置标志，提醒用户修改密码
+        // 检查是否需要更改密码
+        if (user.shouldChangePassword) {
           localStorage.setItem('shouldChangePassword', 'true')
         }
         
-        // 重定向到Overview页面
+        // 如果选择了"记住我"，设置更长的超时时间
+        const timeout = rememberMe.value ? 7 * 24 * 60 * 60 * 1000 : 5 * 60 * 1000
+        localStorage.setItem('sessionTimeout', timeout.toString())
+        
+        // 跳转到主页面
         router.push('/')
       } catch (error) {
-        console.error('Login error:', error)
-        alert('Invalid username or password')
+        // 显示错误消息
+        alert('Login failed: ' + (error.response?.data?.message || 'Invalid credentials'))
       } finally {
         loading.value = false
       }
     }
-
+    
     return {
       valid,
       loading,
       username,
       password,
+      rememberMe,
       usernameRules,
       passwordRules,
-      login: loginHandler
+      login
     }
   }
 }
 </script>
 
 <style scoped>
-.fill-height {
-  min-height: 100vh;
+.v-card {
+  border-radius: 12px !important;
+}
+
+.v-toolbar {
+  border-top-left-radius: 12px !important;
+  border-top-right-radius: 12px !important;
 }
 </style>

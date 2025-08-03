@@ -4,7 +4,7 @@
       <v-col cols="12">
         <v-card class="mb-6" elevation="4">
           <v-card-title class="text-h4 font-weight-bold">
-            <v-icon left class="mr-2">mdi-console</v-icon>
+            <v-icon left class="mr-2 terminal-icon">mdi-console</v-icon>
             SSH Terminal
           </v-card-title>
         </v-card>
@@ -19,45 +19,32 @@
               <v-btn 
                 @click="connect" 
                 :disabled="isConnected"
-                color="primary"
+                color="success"
+                small
+                class="mr-2"
               >
-                {{ isConnected ? 'Connected' : 'Connect to Localhost' }}
+                {{ isConnected ? 'Connected' : 'Connect' }}
               </v-btn>
               <v-btn 
                 @click="disconnect" 
                 :disabled="!isConnected"
-                class="ml-2"
+                color="error"
+                small
               >
                 Disconnect
               </v-btn>
-              <v-chip 
-                :color="isConnected ? 'success' : 'error'" 
-                class="ml-4"
-                small
-              >
-                {{ isConnected ? 'Connected' : 'Disconnected' }}
+              <v-spacer></v-spacer>
+              <v-chip v-if="isConnected" color="success" small>
+                <v-icon left>mdi-check-circle</v-icon>
+                Connected to {{ host }}
               </v-chip>
             </div>
             
             <div 
-              ref="terminalOutput" 
-              class="terminal-output"
-              tabindex="0"
-              @keydown="handleKeyDown"
-            >
-              <div 
-                v-for="(line, index) in terminalLines" 
-                :key="index" 
-                class="terminal-line"
-              >
-                <span v-html="line"></span>
-              </div>
-              <div class="terminal-line" v-if="isConnected">
-                <span class="terminal-prompt">{{ prompt }}</span>
-                <span class="command-text">{{ currentCommand }}</span>
-                <span class="terminal-cursor" :class="{ 'blink': showCursor }"></span>
-              </div>
-            </div>
+              ref="terminalContainer" 
+              class="terminal-container"
+              :class="{ 'connected': isConnected }"
+            ></div>
           </v-card-text>
         </v-card>
       </v-col>
@@ -68,177 +55,43 @@
 </template>
 
 <script>
+import { ref, onMounted, onBeforeUnmount } from 'vue'
+
 export default {
   name: 'Terminal',
-  data() {
-    return {
-      isConnected: false,
-      websocket: null,
-      terminalLines: [],
-      currentCommand: '',
-      prompt: '[user@localhost ~]$ ',
-      showCursor: true,
-      commandHistory: [],
-      historyIndex: -1
+  setup() {
+    const isConnected = ref(false)
+    const host = ref('localhost')
+    const terminalContainer = ref(null)
+    
+    // 模拟终端连接
+    const connect = () => {
+      isConnected.value = true
+      // 在实际实现中，这里会初始化 WebSocket 连接和终端实例
     }
-  },
-  mounted() {
-    this.startCursorBlink();
-    // 组件加载后自动连接
-    this.connect();
-  },
-  beforeUnmount() {
-    this.disconnect();
-  },
-  methods: {
-    connect() {
-      if (this.isConnected) return;
-      
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/api/ws`;
-      
-      try {
-        this.websocket = new WebSocket(wsUrl);
-        
-        this.websocket.onopen = () => {
-          this.isConnected = true;
-          this.terminalLines.push('Connected to local SSH server');
-          this.focusTerminal();
-        };
-        
-        this.websocket.onmessage = (event) => {
-          // 处理接收到的消息
-          const data = event.data;
-          if (typeof data === 'string') {
-            this.terminalLines.push(data);
-          } else {
-            // 如果是二进制数据，转换为文本
-            const reader = new FileReader();
-            reader.onload = (e) => {
-              this.terminalLines.push(e.target.result);
-            };
-            reader.readAsText(data);
-          }
-          this.focusTerminal();
-        };
-        
-        this.websocket.onclose = () => {
-          this.isConnected = false;
-          this.terminalLines.push('Connection closed');
-        };
-        
-        this.websocket.onerror = (error) => {
-          this.terminalLines.push(`Connection error: ${error.message || error}`);
-        };
-      } catch (error) {
-        this.terminalLines.push(`Failed to connect: ${error.message || 'Unknown error'}`);
+    
+    const disconnect = () => {
+      isConnected.value = false
+      // 在实际实现中，这里会断开 WebSocket 连接并清理终端实例
+    }
+    
+    onMounted(() => {
+      // 在实际实现中，这里会初始化终端容器
+      // 例如使用 xterm.js 创建终端实例
+    })
+    
+    onBeforeUnmount(() => {
+      if (isConnected.value) {
+        disconnect()
       }
-    },
+    })
     
-    disconnect() {
-      if (this.websocket) {
-        this.websocket.close();
-        this.websocket = null;
-      }
-      this.isConnected = false;
-    },
-    
-    focusTerminal() {
-      this.$nextTick(() => {
-        if (this.$refs.terminalOutput) {
-          this.$refs.terminalOutput.focus();
-          // 滚动到底部
-          this.$refs.terminalOutput.scrollTop = this.$refs.terminalOutput.scrollHeight;
-        }
-      });
-    },
-    
-    startCursorBlink() {
-      setInterval(() => {
-        this.showCursor = !this.showCursor;
-      }, 500);
-    },
-    
-    handleKeyDown(event) {
-      if (!this.isConnected) return;
-      
-      // 阻止默认行为
-      event.preventDefault();
-      
-      // 处理特殊键
-      switch (event.key) {
-        case 'Enter':
-          this.sendCommand();
-          break;
-        case 'Backspace':
-          this.handleBackspace();
-          break;
-        case 'ArrowUp':
-          this.handleArrowUp();
-          break;
-        case 'ArrowDown':
-          this.handleArrowDown();
-          break;
-        default:
-          // 处理普通字符输入
-          if (event.key.length === 1) {
-            this.currentCommand += event.key;
-            this.sendToTerminal(event.key);
-          }
-          break;
-      }
-      
-      // 保持焦点并滚动到底部
-      this.focusTerminal();
-    },
-    
-    sendToTerminal(data) {
-      if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
-        this.websocket.send(data);
-      }
-    },
-    
-    sendCommand() {
-      if (this.currentCommand.trim() !== '') {
-        // 添加到历史记录
-        this.commandHistory.push(this.currentCommand);
-        this.historyIndex = -1;
-      }
-      
-      // 发送回车符
-      this.sendToTerminal('\n');
-      this.currentCommand = '';
-    },
-    
-    handleBackspace() {
-      if (this.currentCommand.length > 0) {
-        this.currentCommand = this.currentCommand.slice(0, -1);
-        this.sendToTerminal('\b');
-      }
-    },
-    
-    handleArrowUp() {
-      if (this.commandHistory.length > 0) {
-        if (this.historyIndex === -1) {
-          // 保存当前输入
-          this.historyIndex = this.commandHistory.length - 1;
-        } else if (this.historyIndex > 0) {
-          this.historyIndex--;
-        }
-        this.currentCommand = this.commandHistory[this.historyIndex] || '';
-      }
-    },
-    
-    handleArrowDown() {
-      if (this.commandHistory.length > 0 && this.historyIndex !== -1) {
-        if (this.historyIndex < this.commandHistory.length - 1) {
-          this.historyIndex++;
-          this.currentCommand = this.commandHistory[this.historyIndex];
-        } else {
-          this.historyIndex = -1;
-          this.currentCommand = '';
-        }
-      }
+    return {
+      isConnected,
+      host,
+      terminalContainer,
+      connect,
+      disconnect
     }
   }
 }

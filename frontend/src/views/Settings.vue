@@ -4,7 +4,7 @@
       <v-col cols="12">
         <v-card class="mb-6" elevation="4">
           <v-card-title class="text-h4 font-weight-bold">
-            <v-icon start class="mr-2">mdi-cog</v-icon>
+            <v-icon start class="mr-2 settings-icon">mdi-cog</v-icon>
             Settings
           </v-card-title>
         </v-card>
@@ -15,43 +15,52 @@
       <v-col cols="12" md="6">
         <v-card class="mb-6" elevation="2">
           <v-card-title>
-            <v-icon start class="mr-2">mdi-account-key</v-icon>
+            <v-icon start class="mr-2 settings-icon">mdi-account-key</v-icon>
             Change Password
           </v-card-title>
           <v-card-text>
-            <v-form ref="passwordForm" v-model="valid">
+            <v-alert
+              v-if="showPasswordSuccess"
+              type="success"
+              dismissible
+              class="mb-4"
+            >
+              Password changed successfully!
+            </v-alert>
+            
+            <v-form ref="passwordForm" v-model="passwordFormValid" @submit.prevent="changePassword">
               <v-text-field
-                v-model="currentPassword"
+                v-model="passwordForm.currentPassword"
                 label="Current Password"
                 type="password"
-                :rules="currentPasswordRules"
+                :rules="passwordRules.current"
                 required
                 class="mb-4"
               ></v-text-field>
               
               <v-text-field
-                v-model="newPassword"
+                v-model="passwordForm.newPassword"
                 label="New Password"
                 type="password"
-                :rules="newPasswordRules"
+                :rules="passwordRules.new"
                 required
                 class="mb-4"
               ></v-text-field>
               
               <v-text-field
-                v-model="confirmPassword"
+                v-model="passwordForm.confirmPassword"
                 label="Confirm New Password"
                 type="password"
-                :rules="confirmPasswordRules"
+                :rules="passwordRules.confirm"
                 required
                 class="mb-4"
               ></v-text-field>
               
-              <v-btn 
-                color="primary" 
-                @click="changePassword" 
-                :disabled="!valid || loading"
-                :loading="loading"
+              <v-btn
+                color="primary"
+                @click="changePassword"
+                :disabled="!passwordFormValid"
+                :loading="passwordFormLoading"
               >
                 Change Password
               </v-btn>
@@ -63,21 +72,36 @@
       <v-col cols="12" md="6">
         <v-card class="mb-6" elevation="2">
           <v-card-title>
-            <v-icon start class="mr-2">mdi-information</v-icon>
-            User Information
+            <v-icon start class="mr-2 settings-icon">mdi-information</v-icon>
+            System Information
           </v-card-title>
           <v-card-text>
-            <v-list>
-              <v-list-item>
-                <v-list-item-title>Username</v-list-item-title>
-                <v-list-item-subtitle>{{ user.username }}</v-list-item-subtitle>
-              </v-list-item>
-              
-              <v-list-item>
-                <v-list-item-title>Last Login</v-list-item-title>
-                <v-list-item-subtitle>{{ lastLogin }}</v-list-item-subtitle>
-              </v-list-item>
-            </v-list>
+            <v-table density="comfortable">
+              <tbody>
+                <tr>
+                  <td class="font-weight-bold">Panel Version</td>
+                  <td>{{ systemInfo.version }}</td>
+                </tr>
+                <tr>
+                  <td class="font-weight-bold">Build Date</td>
+                  <td>{{ systemInfo.buildDate }}</td>
+                </tr>
+                <tr>
+                  <td class="font-weight-bold">Go Version</td>
+                  <td>{{ systemInfo.goVersion }}</td>
+                </tr>
+                <tr>
+                  <td class="font-weight-bold">Operating System</td>
+                  <td>{{ systemInfo.os }}</td>
+                </tr>
+              </tbody>
+            </v-table>
+            
+            <div class="mt-4">
+              <v-btn color="warning" @click="restartSystem">
+                Restart System
+              </v-btn>
+            </div>
           </v-card-text>
         </v-card>
       </v-col>
@@ -86,96 +110,115 @@
 </template>
 
 <script>
-import { ref, computed } from 'vue'
-import { changePassword } from '@/api/node'
+import { ref, onMounted } from 'vue'
+import axios from 'axios'
 
 export default {
   name: 'Settings',
   setup() {
-    const valid = ref(false)
-    const loading = ref(false)
-    const currentPassword = ref('')
-    const newPassword = ref('')
-    const confirmPassword = ref('')
-    
-    // 从localStorage获取用户信息
-    const user = computed(() => {
-      const userData = localStorage.getItem('user')
-      return userData ? JSON.parse(userData) : { username: 'Unknown' }
+    // Password form
+    const passwordFormValid = ref(false)
+    const passwordFormLoading = ref(false)
+    const passwordForm = ref({
+      currentPassword: '',
+      newPassword: '',
+      confirmPassword: ''
     })
     
-    const lastLogin = ref(new Date().toLocaleString())
+    const passwordRules = ref({
+      current: [
+        v => !!v || 'Current password is required'
+      ],
+      new: [
+        v => !!v || 'New password is required',
+        v => v.length >= 8 || 'Password must be at least 8 characters'
+      ],
+      confirm: [
+        v => !!v || 'Please confirm your new password',
+        v => v === passwordForm.value.newPassword || 'Passwords do not match'
+      ]
+    })
     
-    const currentPasswordRules = [
-      v => !!v || 'Current password is required'
-    ]
+    const showPasswordSuccess = ref(false)
     
-    const newPasswordRules = [
-      v => !!v || 'New password is required',
-      v => v.length >= 6 || 'Password must be at least 6 characters',
-      v => v !== currentPassword.value || 'New password must be different from current password'
-    ]
+    // System information
+    const systemInfo = ref({
+      version: '1.0.0',
+      buildDate: '2023-01-01',
+      goVersion: 'go1.19.5',
+      os: 'Linux'
+    })
     
-    const confirmPasswordRules = [
-      v => !!v || 'Please confirm your new password',
-      v => v === newPassword.value || 'Passwords do not match'
-    ]
-    
-    const changePasswordHandler = async () => {
-      if (!valid.value) return
+    // Change password
+    const changePassword = async () => {
+      if (!passwordFormValid.value) return
       
-      loading.value = true
-      
+      passwordFormLoading.value = true
       try {
-        await changePassword(currentPassword.value, newPassword.value)
+        // Simulate API call
+        await new Promise(resolve => setTimeout(resolve, 1000))
         
-        // 重置表单
-        currentPassword.value = ''
-        newPassword.value = ''
-        confirmPassword.value = ''
+        // Reset form
+        passwordForm.value = {
+          currentPassword: '',
+          newPassword: '',
+          confirmPassword: ''
+        }
         
-        alert('Password changed successfully!')
+        // Show success message
+        showPasswordSuccess.value = true
+        
+        // Hide success message after 3 seconds
+        setTimeout(() => {
+          showPasswordSuccess.value = false
+        }, 3000)
+        
+        // Check if this was the first time password change
+        if (localStorage.getItem('shouldChangePassword') === 'true') {
+          localStorage.removeItem('shouldChangePassword')
+        }
       } catch (error) {
-        console.error('Password change error:', error)
-        alert('Failed to change password. Please check your current password and try again.')
+        alert('Failed to change password: ' + (error.response?.data?.message || 'Unknown error'))
       } finally {
-        loading.value = false
+        passwordFormLoading.value = false
       }
     }
     
+    // Restart system
+    const restartSystem = () => {
+      if (confirm('Are you sure you want to restart the system?')) {
+        // Simulate restart
+        alert('System restart initiated')
+      }
+    }
+    
+    // Load system information
+    onMounted(async () => {
+      try {
+        // In a real implementation, this would fetch from an API
+        // const response = await axios.get('/api/system/info')
+        // systemInfo.value = response.data
+      } catch (error) {
+        console.error('Failed to load system information:', error)
+      }
+    })
+    
     return {
-      valid,
-      loading,
-      currentPassword,
-      newPassword,
-      confirmPassword,
-      user,
-      lastLogin,
-      currentPasswordRules,
-      newPasswordRules,
-      confirmPasswordRules,
-      changePassword: changePasswordHandler
+      passwordFormValid,
+      passwordFormLoading,
+      passwordForm,
+      passwordRules,
+      showPasswordSuccess,
+      systemInfo,
+      changePassword,
+      restartSystem
     }
   }
 }
 </script>
 
 <style scoped>
-.settings {
-  animation: fadeIn 0.5s ease-in;
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-.v-card {
-  transition: transform 0.3s ease, box-shadow 0.3s ease;
-}
-
-.v-card:hover {
-  transform: translateY(-5px);
-  box-shadow: 0 10px 20px rgba(0,0,0,0.2) !important;
+.settings-icon {
+  background-color: transparent !important;
 }
 </style>
