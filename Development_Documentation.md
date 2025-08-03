@@ -15,9 +15,11 @@ This project develops a server control panel similar to 1Panel, designed for man
 - **File Management**: Supports file upload, download, and permission modification.
 
 ## Technology Stack
-- **Backend**: Go
-- **Frontend**: Vue.js
-- **UI Style**: OpenWrt-inspired Bootstrap
+- **Backend**: Go 1.24.5
+- **Frontend**: Vue.js 3, Vuetify 3
+- **UI Style**: Vuetify Material Design
+- **WebSocket**: gorilla/websocket
+- **Authentication**: JWT based authentication
 
 ## Project File Structure
 ```
@@ -27,7 +29,8 @@ project-root/
 │   │   └── main.go                # Backend entry point
 │   ├── internal/
 │   │   ├── api/
-│   │   │   └── handler.go         # API request handlers
+│   │   │   ├── handler.go         # API request handlers
+│   │   │   └── middleware.go      # Authentication middleware
 │   │   ├── models/
 │   │   │   ├── node.go            # Node data structures
 │   │   │   └── job.go             # SLURM job data structures
@@ -44,7 +47,11 @@ project-root/
 │   │   │   └── Table.vue          # Table component
 │   │   ├── views/                 # Page views
 │   │   │   ├── Overview.vue       # Status overview page
-│   │   │   └── System.vue         # System management page
+│   │   │   ├── System.vue         # System management page
+│   │   │   ├── Terminal.vue       # Terminal functionality
+│   │   │   ├── FileManagement.vue # File management
+│   │   │   ├── Login.vue          # Login page
+│   │   │   └── Settings.vue       # Settings page
 │   │   ├── router/
 │   │   │   └── index.js           # Routing configuration
 │   │   ├── store/
@@ -58,11 +65,53 @@ project-root/
 └── README.md                      # Project README
 ```
 
+## Development Environment Setup
+
+### Prerequisites
+- Go 1.24.5 or higher
+- Node.js and npm
+
+### Setup Steps
+1. Clone the repository
+2. Install Go dependencies:
+   ```
+   cd backend
+   go mod tidy
+   ```
+3. Install frontend dependencies:
+   ```
+   cd frontend
+   npm install
+   ```
+
+### Running the Application
+- Start backend server:
+  ```
+  go run backend/cmd/main.go
+  ```
+- Start frontend development server:
+  ```
+  cd frontend
+  npm run serve
+  ```
+
+### Building for Production
+- Build backend:
+  ```
+  go build -o backend/bin/panel backend/cmd/main.go
+  ```
+- Build frontend:
+  ```
+  cd frontend
+  npm run build
+  ```
+
 ## Code File Functional Requirements
 
 ### Backend (Go)
 - **`/cmd/main.go`**: Entry point; initializes the HTTP server, sets up routing, and invokes API handlers.
 - **`/internal/api/handler.go`**: Manages HTTP requests, calls service-layer functions, and returns JSON responses.
+- **`/internal/api/middleware.go`**: Implements authentication middleware for securing endpoints.
 - **`/internal/models/node.go`**: Defines `NodeModel` with fields like hostname, IP, CPU usage (percentage), memory usage (percentage).
 - **`/internal/models/job.go`**: Defines `JobModel` with fields like job_id, submission time, etc.
 - **`/internal/services/node.go`**: Implements logic to retrieve management and compute node data.
@@ -70,10 +119,15 @@ project-root/
 - **`/internal/utils/logger.go`**: Provides logging functionality with configurable levels.
 
 ### Frontend (Vue)
-- **`/src/main.js`**: Vue app entry; initializes Vue instance, mounts router and Vuex.
+- **`/src/main.js`**: Vue app entry; initializes Vue instance, mounts router and Vuex, configures Vuetify.
+- **`/src/App.vue`**: Main application component with layout structure.
 - **`/src/components/Table.vue`**: Reusable table component for displaying node and SLURM data.
 - **`/src/views/Overview.vue`**: Renders the status overview with node and SLURM information. Displays CPU usage as integer percentage and memory usage in "used/total" format (e.g., "5.4GB/16GB").
-- **`/src/views/System.vue`**: Implements terminal and file management features.
+- **`/src/views/System.vue`**: Implements system management features with nested routes.
+- **`/src/views/Terminal.vue`**: Provides web-based terminal functionality.
+- **`/src/views/FileManagement.vue`**: Implements file management features.
+- **`/src/views/Login.vue`**: Handles user authentication.
+- **`/src/views/Settings.vue`**: Provides user settings functionality.
 - **`/src/router/index.js`**: Configures routes mapping to view components.
 - **`/src/store/index.js`**: Manages app state (e.g., node data, job statuses) using Vuex.
 - **`/src/api/node.js`**: Encapsulates API calls for node and SLURM data.
@@ -83,9 +137,10 @@ project-root/
 
 ### Go
 - Adhere to [Go's official style guide](https://golang.org/doc/effective_go.html).
-- Use lowercase with underscores for variables, functions, and package names (snake_case).
+- Use camelCase for variables, functions, and package names.
 - Comments with `//` or `/* */`.
 - Handle errors using the `errors` package; document all functions briefly.
+- Use `fmt` for formatting and `log` for logging.
 
 ### Vue
 - Component names in PascalCase (e.g., `TableComponent`).
@@ -94,32 +149,35 @@ project-root/
 - Indent with 2 spaces.
 - Enforce ESLint for consistency; comment components and functions briefly.
 
+## API Endpoints
+
+### Authentication
+- `POST /api/login` - User login
+- `POST /api/change-password` - Change user password
+
+### Node Information
+- `GET /api/management-node` - Get management node information
+- `GET /api/compute-nodes` - Get compute nodes information
+
+### SLURM Jobs
+- `GET /api/slurm-jobs` - Get SLURM job statuses
+
+### File Management
+- `POST /api/file/upload` - Upload a file
+- `GET /api/file/download` - Download a file
+- `PUT /api/file/permissions` - Change file permissions
+
+### WebSocket
+- `GET /api/ws` - WebSocket connection for real-time updates
+
 ## Function Naming Conventions
 
 ### Backend (Go)
 - **Handlers**: `Handle[FunctionName]` (e.g., `HandleGetNodeInfo`).
-- **Services**: `Get[Resource]` (e.g., `GetNodeInfo`).
-- **Models**: `[Resource]Model` (e.g., `NodeModel`).
+- **Services**: `Get[Resource]` or `Process[Action]` (e.g., `GetNodeInfo`, `ProcessFileUpload`).
+- **Middleware**: `[Action]Middleware` (e.g., `AuthMiddleware`).
 
 ### Frontend (Vue)
-- **API Calls**: `fetch[Resource]` (e.g., `fetchNodeInfo`).
-- **Component Methods**: `[action][Resource]` (e.g., `loadNodeInfo`).
-- **Vuex Actions/Mutations**: `[ACTION/MUTATION]_[RESOURCE]` (e.g., `FETCH_NODE_INFO`).
-
-## Team Roles
-- **Backend Developers**:
-  - Build API handlers, business logic, and data models.
-  - Implement terminal and file management (upload, download, permissions).
-- **Frontend Developers**:
-  - Develop Vue components, views, routing, and state management.
-  - Integrate with backend APIs and ensure real-time data updates.
-  - Design UI following OpenWrt’s Bootstrap style.
-
-## Considerations
-- **Backend APIs**: Use RESTful design for easy frontend integration.
-- **Real-Time Data**: Implement WebSocket or polling for CPU/memory updates.
-- **Terminal**: Consider WebSocket for interactive terminal access.
-- **File Management**: Ensure security in file operations to prevent unauthorized access.
-
-## Conclusion
-This document provides a clear framework for the project’s structure, requirements, and standards, enabling efficient collaboration and development.
+- **Components**: PascalCase (e.g., `NodeTable`).
+- **Methods**: camelCase (e.g., `fetchNodeData`).
+- **Computed Properties**: camelCase (e.g., `formattedMemory`).
