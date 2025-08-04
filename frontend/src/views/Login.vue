@@ -7,16 +7,6 @@
             <v-toolbar-title>SGHPC Panel Login</v-toolbar-title>
           </v-toolbar>
           <v-card-text>
-            <v-alert
-              type="info"
-              outlined
-              class="mb-4"
-            >
-              <div class="font-weight-bold">Default Credentials:</div>
-              <div>Username: <strong>admin</strong></div>
-              <div>Password: <strong>password</strong></div>
-            </v-alert>
-            
             <v-form ref="loginForm" v-model="valid" @submit.prevent="login">
               <v-text-field
                 v-model="username"
@@ -34,11 +24,17 @@
                 label="Password"
                 name="password"
                 prepend-icon="mdi-lock"
-                type="password"
+                :type="showPassword ? 'text' : 'password'"
                 :rules="passwordRules"
                 required
                 @keyup.enter="login"
-              ></v-text-field>
+              >
+                <template v-slot:append>
+                  <v-icon @click="showPassword = !showPassword">
+                    {{ showPassword ? 'mdi-eye' : 'mdi-eye-off' }}
+                  </v-icon>
+                </template>
+              </v-text-field>
               
               <v-checkbox
                 v-model="rememberMe"
@@ -78,6 +74,7 @@ export default {
     const username = ref('')
     const password = ref('')
     const rememberMe = ref(false)
+    const showPassword = ref(false)
     
     const usernameRules = [
       v => !!v || 'Username is required'
@@ -130,6 +127,7 @@ export default {
       username,
       password,
       rememberMe,
+      showPassword,
       usernameRules,
       passwordRules,
       login

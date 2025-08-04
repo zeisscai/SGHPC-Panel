@@ -349,7 +349,34 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	// 验证凭据 - 使用系统用户认证
+	// 获取环境变量中的管理员凭据
+	validUsername := os.Getenv("ADMIN_USERNAME")
+	validPassword := os.Getenv("ADMIN_PASSWORD")
+	
+	// 如果环境变量未设置，则使用默认值
+	if validUsername == "" {
+		validUsername = "admin"
+	}
+	
+	if validPassword == "" {
+		validPassword = "password"
+	}
+	
+	// 首先尝试使用默认凭据验证
+	if credentials.Username == validUsername && credentials.Password == validPassword {
+		// 登录成功，返回token和用户信息
+		response := map[string]interface{}{
+			"token": fmt.Sprintf("token_%d", time.Now().Unix()),
+			"user": map[string]string{
+				"username": credentials.Username,
+			},
+			"is_default_password": (credentials.Username == "admin" && credentials.Password == "password"),
+		}
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+	
+	// 如果默认凭据验证失败，尝试使用系统用户认证
 	valid, err := authenticateSystemUser(credentials.Username, credentials.Password)
 	if err != nil {
 		log.Printf("Authentication error: %v", err)
