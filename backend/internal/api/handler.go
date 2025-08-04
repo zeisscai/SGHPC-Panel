@@ -1,6 +1,7 @@
 package api
 
 import (
+	"panel-tool/internal/services"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,8 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"panel-tool/internal/services"
 
 	"github.com/creack/pty"
 	"github.com/gorilla/websocket"
@@ -377,96 +376,68 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	
 	// 如果默认凭据验证失败，尝试使用系统用户认证
-	valid, err := authenticateSystemUser(credentials.Username, credentials.Password)
+	// 检查用户是否存在
+	getentCmd := exec.Command("getent", "passwd", credentials.Username)
+	if err := getentCmd.Run(); err != nil {
+		// 用户不存在
+		http.Error(w, "Invalid username or password", http.StatusUnauthorized)
+		return
+	}
+	
+	// 使用su命令验证密码
+	cmd := exec.Command("su", "-s", "/bin/sh", credentials.Username, "-c", "echo authenticated")
+	
+	// 创建管道用于传递密码
+	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		log.Printf("Authentication error: %v", err)
 		http.Error(w, "Authentication failed", http.StatusUnauthorized)
 		return
 	}
 	
-	if valid {
+	// 捕获stdout
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		log.Printf("Authentication error: %v", err)
+		http.Error(w, "Authentication failed", http.StatusUnauthorized)
+		return
+	}
+	
+	// 启动命令
+	if err := cmd.Start(); err != nil {
+		log.Printf("Authentication error: %v", err)
+		http.Error(w, "Authentication failed", http.StatusUnauthorized)
+		return
+	}
+	
+	// 写入密码
+	go func() {
+		defer stdin.Close()
+		io.WriteString(stdin, credentials.Password+"\n")
+	}()
+	
+	// 读取输出
+	output, _ := io.ReadAll(stdout)
+	
+	// 等待命令执行完成
+	err = cmd.Wait()
+	
+	// 检查输出和错误码
+	if err == nil && strings.Contains(string(output), "authenticated") {
 		// 登录成功，返回token和用户信息
 		response := map[string]interface{}{
 			"token": fmt.Sprintf("token_%d", time.Now().Unix()),
 			"user": map[string]string{
 				"username": credentials.Username,
 			},
-			"is_default_password": false, // 系统用户不适用此字段
+			"is_default_password": false,
 		}
 		json.NewEncoder(w).Encode(response)
-	} else {
-		// 登录失败
-		http.Error(w, "Invalid username or password", http.StatusUnauthorized)
-	}
-}
-
-// authenticateSystemUser 验证系统用户凭据
-func authenticateSystemUser(username, password string) (bool, error) {
-	// 检查用户是否存在
-	getentCmd := exec.Command("getent", "passwd", username)
-	if err := getentCmd.Run(); err != nil {
-		// 用户不存在
-		return false, nil
+		return
 	}
 	
-	// 使用Unix域套接字和辅助进程进行密码验证
-	// 创建一个临时的认证进程
-	cmd := exec.Command("login", "-p")
-	
-	// 创建管道
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return false, err
-	}
-	
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return false, err
-	}
-	
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return false, err
-	}
-	
-	// 启动进程
-	if err := cmd.Start(); err != nil {
-		return false, err
-	}
-	
-	// 发送用户名和密码
-	go func() {
-		defer stdin.Close()
-		io.WriteString(stdin, username+"\n")
-		time.Sleep(100 * time.Millisecond) // 等待密码提示
-		io.WriteString(stdin, password+"\n")
-	}()
-	
-	// 设置超时
-	done := make(chan error, 1)
-	go func() {
-		_, readErr := io.ReadAll(io.MultiReader(stdout, stderr))
-		done <- readErr
-	}()
-	
-	// 等待验证结果或超时
-	select {
-	case readErr := <-done:
-		if readErr != nil {
-			cmd.Process.Kill()
-			cmd.Wait()
-			return false, readErr
-		}
-		// 等待进程结束
-		err := cmd.Wait()
-		// login命令成功退出（exit code 0）表示认证成功
-		return err == nil, nil
-	case <-time.After(10 * time.Second):
-		// 超时
-		cmd.Process.Kill()
-		cmd.Wait()
-		return false, nil
-	}
+	// 登录失败
+	http.Error(w, "Invalid username or password", http.StatusUnauthorized)
 }
 
 // HandleChangePassword 处理修改密码请求
@@ -772,63 +743,53 @@ func authenticateUser(username, password string) (bool, error) {
 		return false, nil
 	}
 	
-	// 使用Unix域套接字和辅助进程进行密码验证
-	// 创建一个临时的认证进程
-	cmd := exec.Command("login", "-p")
+	// 使用su命令验证密码
+	authCmd := exec.Command("su", "-s", "/bin/sh", username, "-c", "echo authenticated")
 	
-	// 创建管道
-	stdin, err := cmd.StdinPipe()
+	// 创建管道用于传递密码
+	stdin, err := authCmd.StdinPipe()
 	if err != nil {
 		return false, err
 	}
 	
-	stdout, err := cmd.StdoutPipe()
+	// 捕获stdout
+	stdout, err := authCmd.StdoutPipe()
 	if err != nil {
 		return false, err
 	}
 	
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
+	// 启动命令
+	if err := authCmd.Start(); err != nil {
 		return false, err
 	}
 	
-	// 启动进程
-	if err := cmd.Start(); err != nil {
-		return false, err
-	}
-	
-	// 发送用户名和密码
+	// 写入密码
 	go func() {
 		defer stdin.Close()
-		io.WriteString(stdin, username+"\n")
-		time.Sleep(100 * time.Millisecond) // 等待密码提示
 		io.WriteString(stdin, password+"\n")
 	}()
 	
-	// 设置超时
+	// 读取输出
+	output, _ := io.ReadAll(stdout)
+	
+	// 等待命令执行完成（设置超时）
 	done := make(chan error, 1)
 	go func() {
-		_, readErr := io.ReadAll(io.MultiReader(stdout, stderr))
-		done <- readErr
+		done <- authCmd.Wait()
 	}()
 	
-	// 等待验证结果或超时
 	select {
-	case readErr := <-done:
-		if readErr != nil {
-			cmd.Process.Kill()
-			cmd.Wait()
-			return false, readErr
+	case err := <-done:
+		// 检查输出和错误码
+		if err == nil && strings.Contains(string(output), "authenticated") {
+			// 认证成功
+			return true, nil
 		}
-		// 等待进程结束
-		err := cmd.Wait()
-		// login命令成功退出（exit code 0）表示认证成功
-		return err == nil, nil
+		return false, err
 	case <-time.After(10 * time.Second):
 		// 超时
-		cmd.Process.Kill()
-		cmd.Wait()
-		return false, nil
+		authCmd.Process.Kill()
+		return false, fmt.Errorf("authentication timeout")
 	}
 }
 
