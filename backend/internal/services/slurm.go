@@ -1,32 +1,39 @@
 package services
 
 import (
-	"math/rand"
-	"strconv"
 	"time"
-
-	"panel-tool/backend/internal/models"
+	"panel-tool/internal/models"
 )
 
 // GetSlurmJobs 获取SLURM作业状态
-func GetSlurmJobs() []*models.JobModel {
-	rand.New(rand.NewSource(time.Now().UnixNano()))
-	
-	// 模拟一些作业数据
-	jobs := make([]*models.JobModel, 5)
-	users := []string{"alice", "bob", "charlie"}
-	statuses := []string{"pending", "running", "completed", "cancelled", "pending"}
-	
-	for i := 0; i < 5; i++ {
-		jobs[i] = &models.JobModel{
-			JobID:          strconv.Itoa(100 + i),
-			SubmissionTime: time.Now().Add(-time.Duration(rand.Intn(60)) * time.Minute),
-			WaitTime:       strconv.Itoa(rand.Intn(10)) + "m",
-			ComputeTime:    strconv.Itoa(rand.Intn(60)) + "m",
-			User:           users[rand.Intn(len(users))],
-			Status:         statuses[i],
-		}
+func GetSlurmJobs() []models.JobModel {
+	// 模拟数据
+	jobs := []models.JobModel{
+		{
+			JobID:          "12345",
+			SubmissionTime: time.Now().Add(-2 * time.Hour),
+			WaitTime:       "00:02:30",
+			ComputeTime:    "01:25:10",
+			User:           "researcher1",
+			Status:         "running",
+		},
+		{
+			JobID:          "12346",
+			SubmissionTime: time.Now().Add(-1 * time.Hour),
+			WaitTime:       "00:00:00",
+			ComputeTime:    "00:45:22",
+			User:           "researcher2",
+			Status:         "running",
+		},
+		{
+			JobID:          "12347",
+			SubmissionTime: time.Now().Add(-15 * time.Minute),
+			WaitTime:       "00:15:45",
+			ComputeTime:    "00:00:00",
+			User:           "researcher3",
+			Status:         "pending",
+		},
 	}
-	
+
 	return jobs
 }

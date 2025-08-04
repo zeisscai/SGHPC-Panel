@@ -3,17 +3,16 @@ package services
 import (
 	"bufio"
 	"fmt"
-	"math/rand"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 
-	"panel-tool/backend/internal/models"
+	"panel-tool/internal/models"
 )
 
-// GetManagementNode 获取管理节点信息
+// GetManagementNode 获取管理节点真实信息
 func GetManagementNode() *models.ManagementNode {
 	// 获取真实的系统信息
 	hostname := getHostname()
@@ -105,9 +104,9 @@ func getCPUInfo() string {
 	return "Unknown CPU"
 }
 
-// getOSVersion 获取操作系统版本
+// getOSVersion 获取操作系统版本，特别支持Rocky Linux和OpenEuler
 func getOSVersion() string {
-	// 检查 Rocky Linux 或 OpenEuler
+	// 检查 Rocky Linux
 	if _, err := os.Stat("/etc/rocky-release"); err == nil {
 		data, err := os.ReadFile("/etc/rocky-release")
 		if err == nil {
@@ -115,6 +114,7 @@ func getOSVersion() string {
 		}
 	}
 	
+	// 检查 OpenEuler
 	if _, err := os.Stat("/etc/openeuler-release"); err == nil {
 		data, err := os.ReadFile("/etc/openeuler-release")
 		if err == nil {
@@ -179,22 +179,36 @@ func getUptime() string {
 	return fmt.Sprintf("%d days, %d hours, %d minutes", days, hours, minutes)
 }
 
-// GetComputeNodes 获取计算节点信息
-func GetComputeNodes() []*models.NodeModel {
-	// 模拟一些计算节点数据
-	rand.New(rand.NewSource(time.Now().UnixNano()))
-	nodes := make([]*models.NodeModel, 3)
-	
-	for i := 0; i < 3; i++ {
-		nodes[i] = &models.NodeModel{
-			Hostname:     "compute-node-" + string(rune('a'+i)),
-			IP:           "192.168.1." + strconv.Itoa(10+i),
-			CPUUsage:     rand.Float64() * 100,
-			MemoryUsage:  rand.Float64() * 100,
-			Model:        "Dell PowerEdge R750",
-			Architecture: "x86_64",
-		}
+// GetComputeNodes 获取计算节点信息（暂时仍使用模拟数据，实际环境中应从集群管理系统获取）
+func GetComputeNodes() []models.NodeModel {
+	// 注意：在实际HPC环境中，这些信息应该从集群管理系统（如Slurm）获取
+	// 这里暂时保留模拟数据，直到有真实的集群环境可以连接
+	nodes := []models.NodeModel{
+		{
+			Hostname:     "compute-01",
+			IP:           "192.168.1.11",
+			CPUUsage:     68,
+			MemoryUsage:  33.75, // 5.4GB/16GB as percentage
+		},
+		{
+			Hostname:     "compute-02",
+			IP:           "192.168.1.12",
+			CPUUsage:     24,
+			MemoryUsage:  19.375, // 3.1GB/16GB as percentage
+		},
+		{
+			Hostname:     "compute-03",
+			IP:           "192.168.1.13",
+			CPUUsage:     87,
+			MemoryUsage:  80, // 12.8GB/16GB as percentage
+		},
+		{
+			Hostname:     "compute-04",
+			IP:           "192.168.1.14",
+			CPUUsage:     5,
+			MemoryUsage:  7.5, // 1.2GB/16GB as percentage
+		},
 	}
-	
+
 	return nodes
 }
