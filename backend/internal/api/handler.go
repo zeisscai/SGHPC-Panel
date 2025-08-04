@@ -509,19 +509,14 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 					} else {
 						password = strings.TrimSpace(data)
 						
-						// 验证凭据
-						validUsername := os.Getenv("ADMIN_USERNAME")
-						validPassword := os.Getenv("ADMIN_PASSWORD")
-						
-						if validUsername == "" {
-							validUsername = "admin"
+						// 验证操作系统用户凭据
+						// 使用 getent 和 openssl 进行密码验证
+						valid, err := authenticateUser(username, password)
+						if err != nil {
+							log.Printf("Authentication error: %v", err)
 						}
 						
-						if validPassword == "" {
-							validPassword = "password"
-						}
-						
-						if username == validUsername && password == validPassword {
+						if valid {
 							loggedIn = true
 							
 							// 登录成功消息
@@ -531,8 +526,9 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 							})
 							conn.WriteMessage(websocket.TextMessage, successMsg)
 							
-							// 创建PTY连接
-							cmd = exec.Command("/bin/bash")
+							// 创建PTY连接，使用指定用户运行shell
+							// 使用login命令启动用户会话
+							cmd = exec.Command("login", "-f", username)
 							
 							// 启动PTY
 							ptmx, err = pty.Start(cmd)
@@ -637,6 +633,63 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		_ = cmd.Process.Kill()
 		_, _ = cmd.Process.Wait()
 	}
+}
+
+// authenticateUser 验证用户凭据
+func authenticateUser(username, password string) (bool, error) {
+	// 检查用户是否存在
+	getentCmd := exec.Command("getent", "passwd", username)
+	if err := getentCmd.Run(); err != nil {
+		// 用户不存在
+		return false, nil
+	}
+	
+	// 使用系统调用验证密码
+	// 由于Go标准库不直接支持PAM，我们使用一个变通方法
+	// 创建临时shell脚本进行验证
+	
+	// 创建验证脚本
+	scriptContent := fmt.Sprintf(`#!/bin/sh
+echo '%s' | su -s /bin/sh %s -c 'exit 0' 2>/dev/null
+if [ $? -eq 0 ]; then
+    echo "authenticated"
+else
+    echo "failed"
+fi
+`, password, username)
+	
+	// 写入临时脚本文件
+	tmpfile, err := os.CreateTemp("", "auth-*.sh")
+	if err != nil {
+		return false, err
+	}
+	defer os.Remove(tmpfile.Name())
+	
+	// 设置脚本权限
+	if err := os.Chmod(tmpfile.Name(), 0700); err != nil {
+		return false, err
+	}
+	
+	// 写入脚本内容
+	if _, err := tmpfile.WriteString(scriptContent); err != nil {
+		tmpfile.Close()
+		return false, err
+	}
+	tmpfile.Close()
+	
+	// 执行脚本
+	cmd := exec.Command("sh", tmpfile.Name())
+	output, err := cmd.Output()
+	if err != nil {
+		return false, err
+	}
+	
+	// 检查输出
+	if strings.Contains(string(output), "authenticated") {
+		return true, nil
+	}
+	
+	return false, nil
 }
 
 // WebSocketWriter 实现io.Writer接口，将数据写入WebSocket连接
