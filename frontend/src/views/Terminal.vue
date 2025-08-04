@@ -5,7 +5,7 @@
         <v-card class="mb-6" elevation="4">
           <v-card-title class="text-h4 font-weight-bold">
             <v-icon left class="mr-2 terminal-icon">mdi-console</v-icon>
-            SSH Terminal
+            Web Terminal
           </v-card-title>
         </v-card>
       </v-col>
@@ -36,7 +36,7 @@
               <v-spacer></v-spacer>
               <v-chip v-if="isConnected" color="success" small>
                 <v-icon left>mdi-check-circle</v-icon>
-                Connected to {{ host }}
+                Connected to Local Terminal
               </v-chip>
             </div>
             
@@ -49,46 +49,154 @@
         </v-card>
       </v-col>
     </v-row>
-    
-    
   </div>
 </template>
 
 <script>
 import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { Terminal } from '@xterm/xterm'
+import { FitAddon } from '@xterm/addon-fit'
+import '@xterm/xterm/css/xterm.css'
 
 export default {
   name: 'Terminal',
   setup() {
     const isConnected = ref(false)
-    const host = ref('localhost')
     const terminalContainer = ref(null)
+    let terminal = null
+    let fitAddon = null
+    let websocket = null
     
-    // 模拟终端连接
-    const connect = () => {
-      isConnected.value = true
-      // 在实际实现中，这里会初始化 WebSocket 连接和终端实例
+    // 创建终端实例
+    const createTerminal = () => {
+      terminal = new Terminal({
+        cursorBlink: true,
+        theme: {
+          background: '#1e1e1e',
+          foreground: '#ffffff',
+          cursor: '#ffffff'
+        },
+        fontSize: 14,
+        fontFamily: 'Monaco, Consolas, "Courier New", monospace'
+      })
+      
+      fitAddon = new FitAddon()
+      terminal.loadAddon(fitAddon)
+      
+      // 打开终端
+      terminal.open(terminalContainer.value)
+      fitAddon.fit()
+      
+      // 监听终端大小变化
+      window.addEventListener('resize', () => {
+        if (isConnected.value && fitAddon) {
+          fitAddon.fit()
+          sendResizeMessage()
+        }
+      })
     }
     
+    // 连接到WebSocket
+    const connect = () => {
+      if (isConnected.value) return
+      
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const wsUrl = `${protocol}//${window.location.host}/api/ws`
+      
+      try {
+        websocket = new WebSocket(wsUrl)
+        
+        websocket.onopen = () => {
+          isConnected.value = true
+          terminal.write('\x1b[32mConnected to terminal\x1b[0m\r\n')
+        }
+        
+        websocket.onmessage = (event) => {
+          const message = JSON.parse(event.data)
+          switch (message.type) {
+            case 'output':
+              terminal.write(message.data)
+              break
+            case 'error':
+              terminal.write(`\x1b[31m${message.data}\x1b[0m\r\n`)
+              break
+            case 'pong':
+              // 心跳响应，不做处理
+              break
+          }
+        }
+        
+        websocket.onclose = () => {
+          isConnected.value = false
+          terminal.write('\x1b[31m\n\rConnection closed\x1b[0m\r\n')
+        }
+        
+        websocket.onerror = (error) => {
+          terminal.write(`\x1b[31mConnection error: ${error.message || 'Unknown error'}\x1b[0m\r\n`)
+        }
+      } catch (error) {
+        terminal.write(`\x1b[31mFailed to connect: ${error.message || 'Unknown error'}\x1b[0m\r\n`)
+      }
+    }
+    
+    // 断开连接
     const disconnect = () => {
+      if (websocket) {
+        websocket.close()
+        websocket = null
+      }
       isConnected.value = false
-      // 在实际实现中，这里会断开 WebSocket 连接并清理终端实例
+    }
+    
+    // 发送输入到终端
+    const sendInput = (data) => {
+      if (websocket && websocket.readyState === WebSocket.OPEN) {
+        const message = JSON.stringify({
+          type: 'input',
+          data: data
+        })
+        websocket.send(message)
+      }
+    }
+    
+    // 发送窗口大小调整消息
+    const sendResizeMessage = () => {
+      if (websocket && websocket.readyState === WebSocket.OPEN && terminal && fitAddon) {
+        const dims = fitAddon.proposeDimensions()
+        if (dims && dims.cols > 0 && dims.rows > 0) {
+          const message = JSON.stringify({
+            type: 'resize',
+            data: {
+              cols: dims.cols,
+              rows: dims.rows
+            }
+          })
+          websocket.send(message)
+        }
+      }
     }
     
     onMounted(() => {
-      // 在实际实现中，这里会初始化终端容器
-      // 例如使用 xterm.js 创建终端实例
+      createTerminal()
+      
+      // 监听终端输入
+      terminal.onData((data) => {
+        sendInput(data)
+      })
+      
+      // 自动连接
+      connect()
     })
     
     onBeforeUnmount(() => {
-      if (isConnected.value) {
-        disconnect()
+      disconnect()
+      if (terminal) {
+        terminal.dispose()
       }
     })
     
     return {
       isConnected,
-      host,
       terminalContainer,
       connect,
       disconnect
@@ -124,61 +232,12 @@ export default {
   align-items: center;
 }
 
-
-.terminal-output {
-  background-color: #1e1e1e;
-  color: #ffffff;
-  font-family: 'Courier New', monospace;
-  font-size: 14px;
-  line-height: 1.4;
+.terminal-container {
   height: 500px;
-  overflow-y: auto;
-  padding: 16px;
-  outline: none;
-  white-space: pre-wrap;
-  word-break: break-word;
+  padding: 12px;
 }
 
-.terminal-line {
-  margin: 2px 0;
-}
-
-.terminal-prompt {
-  color: #4ec9b0;
-  margin-right: 5px;
-}
-
-.command-text {
-  color: #d4d4d4;
-}
-
-.terminal-cursor {
-  display: inline-block;
-  width: 8px;
-  height: 16px;
-  background-color: #ffffff;
-  vertical-align: middle;
-  margin-left: 2px;
-}
-
-.terminal-cursor.blink {
-  animation: blink 1s infinite;
-}
-
-@keyframes blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
-}
-
-.terminal-info {
-  background-color: #e3f2fd;
-  border-left: 4px solid #2196f3;
-  padding: 16px;
-  border-radius: 4px;
-}
-
-.terminal-info p {
-  margin: 0;
-  line-height: 1.5;
+.terminal-container.connected {
+  background-color: #000000;
 }
 </style>

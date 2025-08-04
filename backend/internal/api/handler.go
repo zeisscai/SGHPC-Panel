@@ -426,6 +426,25 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+// 消息类型常量
+const (
+	CommandInput   = "input"
+	CommandResize  = "resize"
+	CommandPing    = "ping"
+)
+
+// ResizeMessage 定义窗口大小调整消息结构
+type ResizeMessage struct {
+	Cols uint16 `json:"cols"`
+	Rows uint16 `json:"rows"`
+}
+
+// WebSocketMessage 定义WebSocket消息结构
+type WebSocketMessage struct {
+	Type string      `json:"type"`
+	Data interface{} `json:"data"`
+}
+
 // HandleWebSocket 处理WebSocket连接
 func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -435,7 +454,7 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	// 创建PTY连接替代SSH连接
+	// 创建PTY连接
 	// 使用/bin/bash作为默认shell
 	cmd := exec.Command("/bin/bash")
 
@@ -443,7 +462,11 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
 		log.Printf("Failed to start pty: %v", err)
-		conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("Failed to start pty: %v", err)))
+		errorMsg, _ := json.Marshal(WebSocketMessage{
+			Type: "error",
+			Data: fmt.Sprintf("Failed to start pty: %v", err),
+		})
+		conn.WriteMessage(websocket.TextMessage, errorMsg)
 		return
 	}
 	defer func() { 
@@ -452,7 +475,7 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		_, _ = cmd.Process.Wait()
 	}()
 
-	// 设置窗口大小
+	// 设置初始窗口大小
 	pty.Setsize(ptmx, &pty.Winsize{
 		Rows: 30,
 		Cols: 120,
@@ -471,7 +494,11 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// 将PTY输出转发到WebSocket
-			err = conn.WriteMessage(websocket.TextMessage, buf[:n])
+			outputMsg, _ := json.Marshal(WebSocketMessage{
+				Type: "output",
+				Data: string(buf[:n]),
+			})
+			err = conn.WriteMessage(websocket.TextMessage, outputMsg)
 			if err != nil {
 				log.Printf("Error writing to websocket: %v", err)
 				return
@@ -487,11 +514,40 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 
-		// 将输入发送到PTY
-		_, err = ptmx.Write(message)
-		if err != nil {
-			log.Printf("Write error: %v", err)
-			break
+		// 解析消息
+		var msg WebSocketMessage
+		if err := json.Unmarshal(message, &msg); err != nil {
+			log.Printf("Error unmarshaling message: %v", err)
+			continue
+		}
+
+		switch msg.Type {
+		case CommandInput:
+			// 处理终端输入
+			if data, ok := msg.Data.(string); ok {
+				_, err = ptmx.Write([]byte(data))
+				if err != nil {
+					log.Printf("Write error: %v", err)
+					break
+				}
+			}
+		case CommandResize:
+			// 处理窗口大小调整
+			if data, ok := msg.Data.(map[string]interface{}); ok {
+				cols, _ := data["cols"].(float64)
+				rows, _ := data["rows"].(float64)
+				pty.Setsize(ptmx, &pty.Winsize{
+					Rows: uint16(rows),
+					Cols: uint16(cols),
+				})
+			}
+		case CommandPing:
+			// 处理ping消息
+			pongMsg, _ := json.Marshal(WebSocketMessage{
+				Type: "pong",
+				Data: nil,
+			})
+			conn.WriteMessage(websocket.TextMessage, pongMsg)
 		}
 	}
 }
