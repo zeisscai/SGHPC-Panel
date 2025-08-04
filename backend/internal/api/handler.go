@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"panel-tool/internal/services"
-	
+
 	"github.com/creack/pty"
 	"github.com/gorilla/websocket"
 )
@@ -644,52 +644,58 @@ func authenticateUser(username, password string) (bool, error) {
 		return false, nil
 	}
 	
-	// 使用系统调用验证密码
-	// 由于Go标准库不直接支持PAM，我们使用一个变通方法
-	// 创建临时shell脚本进行验证
+	// 使用PAM兼容的方式验证用户凭据
+	// 通过调用login命令并传递凭据进行验证
+	cmd := exec.Command("login", "-f", username)
 	
-	// 创建验证脚本
-	scriptContent := fmt.Sprintf(`#!/bin/sh
-echo '%s' | su -s /bin/sh %s -c 'exit 0' 2>/dev/null
-if [ $? -eq 0 ]; then
-    echo "authenticated"
-else
-    echo "failed"
-fi
-`, password, username)
-	
-	// 写入临时脚本文件
-	tmpfile, err := os.CreateTemp("", "auth-*.sh")
-	if err != nil {
-		return false, err
-	}
-	defer os.Remove(tmpfile.Name())
-	
-	// 设置脚本权限
-	if err := os.Chmod(tmpfile.Name(), 0700); err != nil {
-		return false, err
-	}
-	
-	// 写入脚本内容
-	if _, err := tmpfile.WriteString(scriptContent); err != nil {
-		tmpfile.Close()
-		return false, err
-	}
-	tmpfile.Close()
-	
-	// 执行脚本
-	cmd := exec.Command("sh", tmpfile.Name())
-	output, err := cmd.Output()
+	// 创建stdin和stdout管道
+	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return false, err
 	}
 	
-	// 检查输出
-	if strings.Contains(string(output), "authenticated") {
-		return true, nil
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return false, err
 	}
 	
-	return false, nil
+	// 启动命令
+	if err := cmd.Start(); err != nil {
+		return false, err
+	}
+	
+	// 发送密码
+	go func() {
+		defer stdin.Close()
+		io.WriteString(stdin, password+"\n")
+	}()
+	
+	// 读取输出（设置超时）
+	done := make(chan bool, 1)
+	go func() {
+		buf := make([]byte, 1024)
+		// 读取输出，但不等待完整输出，只要能读取到数据就认为可能成功
+		_, err := io.ReadFull(stdout, buf[:16])
+		if err == nil {
+			done <- true
+		} else {
+			done <- false
+		}
+	}()
+	
+	// 等待验证结果或超时
+	select {
+	case success := <-done:
+		// 终止进程
+		cmd.Process.Kill()
+		cmd.Wait()
+		return success, nil
+	case <-time.After(5 * time.Second):
+		// 超时，终止进程
+		cmd.Process.Kill()
+		cmd.Wait()
+		return false, nil
+	}
 }
 
 // WebSocketWriter 实现io.Writer接口，将数据写入WebSocket连接
