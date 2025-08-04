@@ -34,9 +34,13 @@
                 Disconnect
               </v-btn>
               <v-spacer></v-spacer>
-              <v-chip v-if="isConnected" color="success" small>
+              <v-chip v-if="isConnected && isLoggedIn" color="success" small>
                 <v-icon left>mdi-check-circle</v-icon>
-                Connected to Local Terminal
+                Logged in
+              </v-chip>
+              <v-chip v-else-if="isConnected && !isLoggedIn" color="warning" small>
+                <v-icon left>mdi-account-clock</v-icon>
+                Login Required
               </v-chip>
             </div>
             
@@ -62,6 +66,7 @@ export default {
   name: 'Terminal',
   setup() {
     const isConnected = ref(false)
+    const isLoggedIn = ref(false)
     const terminalContainer = ref(null)
     let terminal = null
     let fitAddon = null
@@ -88,6 +93,16 @@ export default {
       fitAddon.fit()
       
       // 监听终端大小变化
+      const resizeObserver = new ResizeObserver(() => {
+        if (isConnected.value && fitAddon) {
+          fitAddon.fit()
+          sendResizeMessage()
+        }
+      })
+      
+      resizeObserver.observe(terminalContainer.value)
+      
+      // 监听窗口大小变化
       window.addEventListener('resize', () => {
         if (isConnected.value && fitAddon) {
           fitAddon.fit()
@@ -108,7 +123,7 @@ export default {
         
         websocket.onopen = () => {
           isConnected.value = true
-          terminal.write('\x1b[32mConnected to terminal\x1b[0m\r\n')
+          isLoggedIn.value = false
         }
         
         websocket.onmessage = (event) => {
@@ -116,6 +131,10 @@ export default {
           switch (message.type) {
             case 'output':
               terminal.write(message.data)
+              // 检查是否登录成功
+              if (message.data.includes("Login successful")) {
+                isLoggedIn.value = true
+              }
               break
             case 'error':
               terminal.write(`\x1b[31m${message.data}\x1b[0m\r\n`)
@@ -128,6 +147,7 @@ export default {
         
         websocket.onclose = () => {
           isConnected.value = false
+          isLoggedIn.value = false
           terminal.write('\x1b[31m\n\rConnection closed\x1b[0m\r\n')
         }
         
@@ -146,6 +166,7 @@ export default {
         websocket = null
       }
       isConnected.value = false
+      isLoggedIn.value = false
     }
     
     // 发送输入到终端
@@ -197,6 +218,7 @@ export default {
     
     return {
       isConnected,
+      isLoggedIn,
       terminalContainer,
       connect,
       disconnect
@@ -208,6 +230,7 @@ export default {
 <style scoped>
 .terminal {
   animation: fadeIn 0.5s ease-in;
+  height: 100%;
 }
 
 @keyframes fadeIn {
@@ -233,11 +256,18 @@ export default {
 }
 
 .terminal-container {
-  height: 500px;
+  height: 70vh; /* 使用视口高度 */
+  min-height: 400px; /* 最小高度 */
   padding: 12px;
 }
 
 .terminal-container.connected {
   background-color: #000000;
+}
+
+@media (max-width: 768px) {
+  .terminal-container {
+    height: 50vh;
+  }
 }
 </style>

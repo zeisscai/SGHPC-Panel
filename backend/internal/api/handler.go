@@ -431,6 +431,7 @@ const (
 	CommandInput   = "input"
 	CommandResize  = "resize"
 	CommandPing    = "ping"
+	CommandLogin   = "login"
 )
 
 // ResizeMessage 定义窗口大小调整消息结构
@@ -445,6 +446,12 @@ type WebSocketMessage struct {
 	Data interface{} `json:"data"`
 }
 
+// LoginData 定义登录数据结构
+type LoginData struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
 // HandleWebSocket 处理WebSocket连接
 func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -454,59 +461,22 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	// 创建PTY连接
-	// 使用/bin/bash作为默认shell
-	cmd := exec.Command("/bin/bash")
-
-	// 启动PTY
-	ptmx, err := pty.Start(cmd)
-	if err != nil {
-		log.Printf("Failed to start pty: %v", err)
-		errorMsg, _ := json.Marshal(WebSocketMessage{
-			Type: "error",
-			Data: fmt.Sprintf("Failed to start pty: %v", err),
-		})
-		conn.WriteMessage(websocket.TextMessage, errorMsg)
-		return
-	}
-	defer func() { 
-		_ = ptmx.Close()
-		_ = cmd.Process.Kill()
-		_, _ = cmd.Process.Wait()
-	}()
-
-	// 设置初始窗口大小
-	pty.Setsize(ptmx, &pty.Winsize{
-		Rows: 30,
-		Cols: 120,
+	// 发送欢迎消息，提示用户登录
+	welcomeMsg, _ := json.Marshal(WebSocketMessage{
+		Type: "output",
+		Data: "Welcome to SGHPC Terminal\r\nPlease login to continue\r\nUsername: ",
 	})
+	conn.WriteMessage(websocket.TextMessage, welcomeMsg)
 
-	// 启动goroutine处理PTY输出并转发到WebSocket
-	go func() {
-		buf := make([]byte, 1024)
-		for {
-			n, err := ptmx.Read(buf)
-			if err != nil {
-				if err != io.EOF {
-					log.Printf("Error reading from pty: %v", err)
-				}
-				return
-			}
-
-			// 将PTY输出转发到WebSocket
-			outputMsg, _ := json.Marshal(WebSocketMessage{
-				Type: "output",
-				Data: string(buf[:n]),
-			})
-			err = conn.WriteMessage(websocket.TextMessage, outputMsg)
-			if err != nil {
-				log.Printf("Error writing to websocket: %v", err)
-				return
-			}
-		}
-	}()
+	var cmd *exec.Cmd
+	var ptmx *os.File
 
 	// 处理来自WebSocket的输入并转发到PTY
+	// 登录状态
+	loggedIn := false
+	expectingUsername := true
+	var username, password string
+
 	for {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
@@ -521,6 +491,114 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
+		// 如果未登录，处理登录流程
+		if !loggedIn {
+			switch msg.Type {
+			case CommandInput:
+				if data, ok := msg.Data.(string); ok {
+					if expectingUsername {
+						username = strings.TrimSpace(data)
+						expectingUsername = false
+						
+						// 请求密码
+						passwordPrompt, _ := json.Marshal(WebSocketMessage{
+							Type: "output",
+							Data: "Password: ",
+						})
+						conn.WriteMessage(websocket.TextMessage, passwordPrompt)
+					} else {
+						password = strings.TrimSpace(data)
+						
+						// 验证凭据
+						validUsername := os.Getenv("ADMIN_USERNAME")
+						validPassword := os.Getenv("ADMIN_PASSWORD")
+						
+						if validUsername == "" {
+							validUsername = "admin"
+						}
+						
+						if validPassword == "" {
+							validPassword = "password"
+						}
+						
+						if username == validUsername && password == validPassword {
+							loggedIn = true
+							
+							// 登录成功消息
+							successMsg, _ := json.Marshal(WebSocketMessage{
+								Type: "output",
+								Data: "\r\nLogin successful. Starting terminal...\r\n",
+							})
+							conn.WriteMessage(websocket.TextMessage, successMsg)
+							
+							// 创建PTY连接
+							cmd = exec.Command("/bin/bash")
+							
+							// 启动PTY
+							ptmx, err = pty.Start(cmd)
+							if err != nil {
+								log.Printf("Failed to start pty: %v", err)
+								errorMsg, _ := json.Marshal(WebSocketMessage{
+									Type: "error",
+									Data: fmt.Sprintf("Failed to start pty: %v", err),
+								})
+								conn.WriteMessage(websocket.TextMessage, errorMsg)
+								return
+							}
+							
+							// 设置初始窗口大小
+							pty.Setsize(ptmx, &pty.Winsize{
+								Rows: 30,
+								Cols: 120,
+							})
+							
+							// 启动goroutine处理PTY输出并转发到WebSocket
+							go func() {
+								buf := make([]byte, 1024)
+								for {
+									n, err := ptmx.Read(buf)
+									if err != nil {
+										if err != io.EOF {
+											log.Printf("Error reading from pty: %v", err)
+										}
+										return
+									}
+									
+									// 将PTY输出转发到WebSocket
+									outputMsg, _ := json.Marshal(WebSocketMessage{
+										Type: "output",
+										Data: string(buf[:n]),
+									})
+									err = conn.WriteMessage(websocket.TextMessage, outputMsg)
+									if err != nil {
+										log.Printf("Error writing to websocket: %v", err)
+										return
+									}
+								}
+							}()
+						} else {
+							// 登录失败，重新提示输入用户名
+							failMsg, _ := json.Marshal(WebSocketMessage{
+								Type: "output",
+								Data: "\r\nLogin failed. Please try again.\r\nUsername: ",
+							})
+							conn.WriteMessage(websocket.TextMessage, failMsg)
+							expectingUsername = true
+						}
+					}
+				}
+			case CommandPing:
+				// 处理ping消息
+				pongMsg, _ := json.Marshal(WebSocketMessage{
+					Type: "pong",
+					Data: nil,
+				})
+				conn.WriteMessage(websocket.TextMessage, pongMsg)
+			}
+			continue
+		}
+
+		// 已登录，处理正常终端操作
 		switch msg.Type {
 		case CommandInput:
 			// 处理终端输入
@@ -549,6 +627,15 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			})
 			conn.WriteMessage(websocket.TextMessage, pongMsg)
 		}
+	}
+	
+	// 清理资源
+	if ptmx != nil {
+		_ = ptmx.Close()
+	}
+	if cmd != nil {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
 	}
 }
 
