@@ -34,13 +34,13 @@
                 Disconnect
               </v-btn>
               <v-spacer></v-spacer>
-              <v-chip v-if="isConnected && isLoggedIn" color="success" small>
+              <v-chip v-if="isConnected" color="success" small>
                 <v-icon left>mdi-check-circle</v-icon>
-                Logged in
+                Connected
               </v-chip>
-              <v-chip v-else-if="isConnected && !isLoggedIn" color="warning" small>
-                <v-icon left>mdi-account-clock</v-icon>
-                Login Required
+              <v-chip v-else color="error" small>
+                <v-icon left>mdi-close-circle</v-icon>
+                Disconnected
               </v-chip>
             </div>
             
@@ -66,7 +66,6 @@ export default {
   name: 'Terminal',
   setup() {
     const isConnected = ref(false)
-    const isLoggedIn = ref(false)
     const terminalContainer = ref(null)
     let terminal = null
     let fitAddon = null
@@ -123,7 +122,6 @@ export default {
         
         websocket.onopen = () => {
           isConnected.value = true
-          isLoggedIn.value = false
         }
         
         websocket.onmessage = (event) => {
@@ -131,10 +129,6 @@ export default {
           switch (message.type) {
             case 'output':
               terminal.write(message.data)
-              // 检查是否登录成功
-              if (message.data.includes("Login successful")) {
-                isLoggedIn.value = true
-              }
               break
             case 'error':
               terminal.write(`\x1b[31m${message.data}\x1b[0m\r\n`)
@@ -218,7 +212,6 @@ export default {
     
     return {
       isConnected,
-      isLoggedIn,
       terminalContainer,
       connect,
       disconnect
