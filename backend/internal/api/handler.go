@@ -349,32 +349,96 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	// 获取有效的用户名和密码
-	validUsername := os.Getenv("ADMIN_USERNAME")
-	validPassword := os.Getenv("ADMIN_PASSWORD")
-	
-	if validUsername == "" {
-		validUsername = "admin"
+	// 验证凭据 - 使用系统用户认证
+	valid, err := authenticateSystemUser(credentials.Username, credentials.Password)
+	if err != nil {
+		log.Printf("Authentication error: %v", err)
+		http.Error(w, "Authentication failed", http.StatusUnauthorized)
+		return
 	}
 	
-	if validPassword == "" {
-		validPassword = "password"
-	}
-	
-	// 验证凭据
-	if credentials.Username == validUsername && credentials.Password == validPassword {
+	if valid {
 		// 登录成功，返回token和用户信息
 		response := map[string]interface{}{
 			"token": fmt.Sprintf("token_%d", time.Now().Unix()),
 			"user": map[string]string{
 				"username": credentials.Username,
 			},
-			"is_default_password": (credentials.Username == "admin" && credentials.Password == "password"),
+			"is_default_password": false, // 系统用户不适用此字段
 		}
 		json.NewEncoder(w).Encode(response)
 	} else {
 		// 登录失败
 		http.Error(w, "Invalid username or password", http.StatusUnauthorized)
+	}
+}
+
+// authenticateSystemUser 验证系统用户凭据
+func authenticateSystemUser(username, password string) (bool, error) {
+	// 检查用户是否存在
+	getentCmd := exec.Command("getent", "passwd", username)
+	if err := getentCmd.Run(); err != nil {
+		// 用户不存在
+		return false, nil
+	}
+	
+	// 使用Unix域套接字和辅助进程进行密码验证
+	// 创建一个临时的认证进程
+	cmd := exec.Command("login", "-p")
+	
+	// 创建管道
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return false, err
+	}
+	
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return false, err
+	}
+	
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return false, err
+	}
+	
+	// 启动进程
+	if err := cmd.Start(); err != nil {
+		return false, err
+	}
+	
+	// 发送用户名和密码
+	go func() {
+		defer stdin.Close()
+		io.WriteString(stdin, username+"\n")
+		time.Sleep(100 * time.Millisecond) // 等待密码提示
+		io.WriteString(stdin, password+"\n")
+	}()
+	
+	// 设置超时
+	done := make(chan error, 1)
+	go func() {
+		_, readErr := io.ReadAll(io.MultiReader(stdout, stderr))
+		done <- readErr
+	}()
+	
+	// 等待验证结果或超时
+	select {
+	case readErr := <-done:
+		if readErr != nil {
+			cmd.Process.Kill()
+			cmd.Wait()
+			return false, readErr
+		}
+		// 等待进程结束
+		err := cmd.Wait()
+		// login命令成功退出（exit code 0）表示认证成功
+		return err == nil, nil
+	case <-time.After(10 * time.Second):
+		// 超时
+		cmd.Process.Kill()
+		cmd.Wait()
+		return false, nil
 	}
 }
 
@@ -475,6 +539,7 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// 登录状态
 	loggedIn := false
 	expectingUsername := true
+	expectingPassword := false
 	var username, password string
 
 	for {
@@ -496,90 +561,126 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			switch msg.Type {
 			case CommandInput:
 				if data, ok := msg.Data.(string); ok {
-					if expectingUsername {
-						username = strings.TrimSpace(data)
-						expectingUsername = false
-						
-						// 请求密码
-						passwordPrompt, _ := json.Marshal(WebSocketMessage{
-							Type: "output",
-							Data: "Password: ",
-						})
-						conn.WriteMessage(websocket.TextMessage, passwordPrompt)
-					} else {
-						password = strings.TrimSpace(data)
-						
-						// 验证操作系统用户凭据
-						// 使用 getent 和 openssl 进行密码验证
-						valid, err := authenticateUser(username, password)
-						if err != nil {
-							log.Printf("Authentication error: %v", err)
-						}
-						
-						if valid {
-							loggedIn = true
+					// 处理回车键
+					if data == "\r" || data == "\n" {
+						if expectingUsername && username != "" {
+							// 用户名输入完成，请求密码
+							expectingUsername = false
+							expectingPassword = true
 							
-							// 登录成功消息
-							successMsg, _ := json.Marshal(WebSocketMessage{
+							// 请求密码（不显示输入）
+							passwordPrompt, _ := json.Marshal(WebSocketMessage{
 								Type: "output",
-								Data: "\r\nLogin successful. Starting terminal...\r\n",
+								Data: "Password: ",
 							})
-							conn.WriteMessage(websocket.TextMessage, successMsg)
+							conn.WriteMessage(websocket.TextMessage, passwordPrompt)
+						} else if expectingPassword && password != "" {
+							// 密码输入完成，进行验证
+							expectingPassword = false
 							
-							// 创建PTY连接，使用指定用户运行shell
-							// 使用login命令启动用户会话
-							cmd = exec.Command("login", "-f", username)
-							
-							// 启动PTY
-							ptmx, err = pty.Start(cmd)
+							// 验证操作系统用户凭据
+							valid, err := authenticateUser(username, password)
 							if err != nil {
-								log.Printf("Failed to start pty: %v", err)
-								errorMsg, _ := json.Marshal(WebSocketMessage{
-									Type: "error",
-									Data: fmt.Sprintf("Failed to start pty: %v", err),
-								})
-								conn.WriteMessage(websocket.TextMessage, errorMsg)
-								return
+								log.Printf("Authentication error: %v", err)
 							}
 							
-							// 设置初始窗口大小
-							pty.Setsize(ptmx, &pty.Winsize{
-								Rows: 30,
-								Cols: 120,
-							})
-							
-							// 启动goroutine处理PTY输出并转发到WebSocket
-							go func() {
-								buf := make([]byte, 1024)
-								for {
-									n, err := ptmx.Read(buf)
-									if err != nil {
-										if err != io.EOF {
-											log.Printf("Error reading from pty: %v", err)
-										}
-										return
-									}
-									
-									// 将PTY输出转发到WebSocket
-									outputMsg, _ := json.Marshal(WebSocketMessage{
-										Type: "output",
-										Data: string(buf[:n]),
+							if valid {
+								loggedIn = true
+								
+								// 登录成功消息
+								successMsg, _ := json.Marshal(WebSocketMessage{
+									Type: "output",
+									Data: "\r\nLogin successful. Starting terminal...\r\n",
+								})
+								conn.WriteMessage(websocket.TextMessage, successMsg)
+								
+								// 创建PTY连接，使用指定用户运行shell
+								// 使用login命令启动用户会话
+								cmd = exec.Command("login", "-f", username)
+								
+								// 启动PTY
+								ptmx, err = pty.Start(cmd)
+								if err != nil {
+									log.Printf("Failed to start pty: %v", err)
+									errorMsg, _ := json.Marshal(WebSocketMessage{
+										Type: "error",
+										Data: fmt.Sprintf("Failed to start pty: %v", err),
 									})
-									err = conn.WriteMessage(websocket.TextMessage, outputMsg)
-									if err != nil {
-										log.Printf("Error writing to websocket: %v", err)
-										return
-									}
+									conn.WriteMessage(websocket.TextMessage, errorMsg)
+									return
 								}
-							}()
+								
+								// 设置初始窗口大小
+								pty.Setsize(ptmx, &pty.Winsize{
+									Rows: 30,
+									Cols: 120,
+								})
+								
+								// 启动goroutine处理PTY输出并转发到WebSocket
+								go func() {
+									buf := make([]byte, 1024)
+									for {
+										n, err := ptmx.Read(buf)
+										if err != nil {
+											if err != io.EOF {
+												log.Printf("Error reading from pty: %v", err)
+											}
+											return
+										}
+										
+										// 将PTY输出转发到WebSocket
+										outputMsg, _ := json.Marshal(WebSocketMessage{
+											Type: "output",
+											Data: string(buf[:n]),
+										})
+										err = conn.WriteMessage(websocket.TextMessage, outputMsg)
+										if err != nil {
+											log.Printf("Error writing to websocket: %v", err)
+											return
+										}
+									}
+								}()
+							} else {
+								// 登录失败，重新提示输入用户名
+								failMsg, _ := json.Marshal(WebSocketMessage{
+									Type: "output",
+									Data: "\r\nLogin failed. Please try again.\r\nUsername: ",
+								})
+								conn.WriteMessage(websocket.TextMessage, failMsg)
+								expectingUsername = true
+								expectingPassword = false
+								username = ""
+								password = ""
+							}
 						} else {
-							// 登录失败，重新提示输入用户名
-							failMsg, _ := json.Marshal(WebSocketMessage{
+							// 如果在等待输入但没有内容，则重新提示
+							if expectingUsername {
+								usernamePrompt, _ := json.Marshal(WebSocketMessage{
+									Type: "output",
+									Data: "Username: ",
+								})
+								conn.WriteMessage(websocket.TextMessage, usernamePrompt)
+							} else if expectingPassword {
+								passwordPrompt, _ := json.Marshal(WebSocketMessage{
+									Type: "output",
+									Data: "Password: ",
+								})
+								conn.WriteMessage(websocket.TextMessage, passwordPrompt)
+							}
+						}
+					} else {
+						// 处理普通字符输入
+						if expectingUsername {
+							// 回显用户名字符
+							username += data
+							outputMsg, _ := json.Marshal(WebSocketMessage{
 								Type: "output",
-								Data: "\r\nLogin failed. Please try again.\r\nUsername: ",
+								Data: data,
 							})
-							conn.WriteMessage(websocket.TextMessage, failMsg)
-							expectingUsername = true
+							conn.WriteMessage(websocket.TextMessage, outputMsg)
+						} else if expectingPassword {
+							// 不回显密码字符
+							password += data
 						}
 					}
 				}
@@ -644,11 +745,11 @@ func authenticateUser(username, password string) (bool, error) {
 		return false, nil
 	}
 	
-	// 使用PAM兼容的方式验证用户凭据
-	// 通过调用login命令并传递凭据进行验证
-	cmd := exec.Command("login", "-f", username)
+	// 使用Unix域套接字和辅助进程进行密码验证
+	// 创建一个临时的认证进程
+	cmd := exec.Command("login", "-p")
 	
-	// 创建stdin和stdout管道
+	// 创建管道
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return false, err
@@ -659,39 +760,45 @@ func authenticateUser(username, password string) (bool, error) {
 		return false, err
 	}
 	
-	// 启动命令
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return false, err
+	}
+	
+	// 启动进程
 	if err := cmd.Start(); err != nil {
 		return false, err
 	}
 	
-	// 发送密码
+	// 发送用户名和密码
 	go func() {
 		defer stdin.Close()
+		io.WriteString(stdin, username+"\n")
+		time.Sleep(100 * time.Millisecond) // 等待密码提示
 		io.WriteString(stdin, password+"\n")
 	}()
 	
-	// 读取输出（设置超时）
-	done := make(chan bool, 1)
+	// 设置超时
+	done := make(chan error, 1)
 	go func() {
-		buf := make([]byte, 1024)
-		// 读取输出，但不等待完整输出，只要能读取到数据就认为可能成功
-		_, err := io.ReadFull(stdout, buf[:16])
-		if err == nil {
-			done <- true
-		} else {
-			done <- false
-		}
+		_, readErr := io.ReadAll(io.MultiReader(stdout, stderr))
+		done <- readErr
 	}()
 	
 	// 等待验证结果或超时
 	select {
-	case success := <-done:
-		// 终止进程
-		cmd.Process.Kill()
-		cmd.Wait()
-		return success, nil
-	case <-time.After(5 * time.Second):
-		// 超时，终止进程
+	case readErr := <-done:
+		if readErr != nil {
+			cmd.Process.Kill()
+			cmd.Wait()
+			return false, readErr
+		}
+		// 等待进程结束
+		err := cmd.Wait()
+		// login命令成功退出（exit code 0）表示认证成功
+		return err == nil, nil
+	case <-time.After(10 * time.Second):
+		// 超时
 		cmd.Process.Kill()
 		cmd.Wait()
 		return false, nil

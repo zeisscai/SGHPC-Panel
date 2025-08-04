@@ -26,6 +26,7 @@
                 type="text"
                 :rules="usernameRules"
                 required
+                @keyup.enter="login"
               ></v-text-field>
 
               <v-text-field
@@ -36,6 +37,7 @@
                 type="password"
                 :rules="passwordRules"
                 required
+                @keyup.enter="login"
               ></v-text-field>
               
               <v-checkbox
