@@ -22,6 +22,14 @@ func main() {
 	http.HandleFunc("/api/file/delete", api.HandleFileDelete)
 	http.HandleFunc("/api/file/permissions", api.HandleFilePermissions)
 	
+	// Slurm部署相关路由
+	http.HandleFunc("/api/slurm/config", api.HandleGetSlurmConfig)
+	http.HandleFunc("/api/slurm/config/update", api.HandleUpdateSlurmConfig)
+	http.HandleFunc("/api/slurm/deploy/status", api.HandleGetSlurmDeployStatus)
+	http.HandleFunc("/api/slurm/deploy/start", api.HandleStartSlurmDeploy)
+	http.HandleFunc("/api/slurm/deploy/logs", api.HandleGetSlurmDeployLogs)
+	http.HandleFunc("/api/slurm/service/control", api.HandleSlurmServiceControl)
+	
 	// WebSocket终端路由
 	http.HandleFunc("/api/ws", api.HandleWebSocket)
 	

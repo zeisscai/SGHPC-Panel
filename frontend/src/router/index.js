@@ -4,6 +4,7 @@ import System from '../views/System.vue'
 import Terminal from '../views/Terminal.vue'
 import FileManagement from '../views/FileManagement.vue'
 import Login from '../views/Login.vue'
+import SlurmDeploy from '../views/SlurmDeploy.vue'
 
 const routes = [
   {
@@ -16,6 +17,12 @@ const routes = [
     path: '/',
     name: 'Overview',
     component: Overview,
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/slurm',
+    name: 'SlurmDeploy',
+    component: SlurmDeploy,
     meta: { requiresAuth: true }
   },
   {
@@ -50,23 +57,17 @@ router.beforeEach((to, from, next) => {
   // 检查是否需要认证
   if (to.matched.some(record => record.meta.requiresAuth)) {
     if (!isAuthenticated) {
-      next('/login')
-    } else {
-      // 更新最后活动时间
-      localStorage.setItem('lastActivity', Date.now().toString())
-      next()
-    }
-  } 
-  // 检查是否需要访客权限（如登录页面）
-  else if (to.matched.some(record => record.meta.requiresGuest)) {
-    if (isAuthenticated) {
-      next('/')
+      next({
+        path: '/login',
+        query: { redirect: to.fullPath }
+      })
     } else {
       next()
     }
-  } 
-  // 其他情况直接通过
-  else {
+  } else if (to.matched.some(record => record.meta.requiresGuest) && isAuthenticated) {
+    // 如果已认证且访问的是访客专用页面，则重定向到主页
+    next({ path: '/' })
+  } else {
     next()
   }
 })

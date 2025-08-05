@@ -36,6 +36,24 @@
         >Overview</v-tooltip>
       </v-list-item>
       
+      <v-list-item
+        link
+        to="/slurm"
+        :active="$route.path === '/slurm'"
+        class="sidebar-item"
+        :ripple="false"
+      >
+        <template v-slot:prepend>
+          <v-icon class="sidebar-icon">mdi-server-network</v-icon>
+        </template>
+        <v-list-item-title v-if="!isRail">Slurm Deployment</v-list-item-title>
+        <v-tooltip
+          v-if="isRail"
+          activator="parent"
+          location="right"
+        >Slurm Deployment</v-tooltip>
+      </v-list-item>
+      
       <v-list-group value="system" class="list-group">
         <template v-slot:activator="{ props }">
           <v-list-item
