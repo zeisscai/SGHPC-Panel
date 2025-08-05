@@ -67,7 +67,11 @@
             Compute Nodes
           </v-card-title>
           <v-card-text>
+            <v-alert v-if="nodeStatusMessage" type="warning" outlined>
+              {{ nodeStatusMessage }}
+            </v-alert>
             <v-data-table
+              v-else
               :headers="nodeHeaders"
               :items="computeNodes"
               class="elevation-1"
@@ -112,7 +116,11 @@
             SLURM Jobs
           </v-card-title>
           <v-card-text>
+            <v-alert v-if="jobStatusMessage" type="warning" outlined>
+              {{ jobStatusMessage }}
+            </v-alert>
             <v-data-table
+              v-else
               :headers="jobHeaders"
               :items="activeJobs"
               class="elevation-1"
@@ -150,6 +158,8 @@ export default {
     const slurmJobs = ref([])
     const loadingNodes = ref(false)
     const loadingJobs = ref(false)
+    const nodeStatusMessage = ref('')
+    const jobStatusMessage = ref('')
     
     // 只显示等待或正在计算的作业（过滤掉已完成、取消的作业）
     const activeJobs = computed(() => {
@@ -204,15 +214,31 @@ export default {
     
     const loadComputeNodes = async () => {
       loadingNodes.value = true
+      nodeStatusMessage.value = '' // 重置状态消息
       try {
         const nodes = await fetchComputeNodes()
-        // 添加状态字段
-        computeNodes.value = nodes.map(node => ({
-          ...node,
-          status: node.cpu_usage > 80 ? 'High Load' : 'Normal'
-        }))
+        if (nodes.length === 0) {
+          // 检查slurm是否安装
+          try {
+            await fetchSlurmJobs() // 通过尝试获取作业信息来检查slurm状态
+            nodeStatusMessage.value = 'Slurmctld已运行但没有客户端在线'
+          } catch (error) {
+            if (error.message.includes('Failed to fetch')) {
+              nodeStatusMessage.value = 'Slurm未安装'
+            } else {
+              nodeStatusMessage.value = '无法获取节点信息'
+            }
+          }
+        } else {
+          // 添加状态字段
+          computeNodes.value = nodes.map(node => ({
+            ...node,
+            status: node.cpu_usage > 80 ? 'High Load' : 'Normal'
+          }))
+        }
       } catch (error) {
         console.error('Failed to load compute nodes:', error)
+        nodeStatusMessage.value = '无法获取节点信息'
       } finally {
         loadingNodes.value = false
       }
@@ -220,10 +246,27 @@ export default {
     
     const loadSlurmJobs = async () => {
       loadingJobs.value = true
+      jobStatusMessage.value = '' // 重置状态消息
       try {
-        slurmJobs.value = await fetchSlurmJobs()
+        const jobs = await fetchSlurmJobs()
+        if (jobs.length === 0) {
+          // 检查slurm是否安装
+          try {
+            await fetchComputeNodes() // 通过尝试获取节点信息来检查slurm状态
+            jobStatusMessage.value = 'Slurmctld已运行但没有客户端在线'
+          } catch (error) {
+            if (error.message.includes('Failed to fetch')) {
+              jobStatusMessage.value = 'Slurm未安装'
+            } else {
+              jobStatusMessage.value = '无法获取作业信息'
+            }
+          }
+        } else {
+          slurmJobs.value = jobs
+        }
       } catch (error) {
         console.error('Failed to load SLURM jobs:', error)
+        jobStatusMessage.value = '无法获取作业信息'
       } finally {
         loadingJobs.value = false
       }
@@ -244,6 +287,8 @@ export default {
       jobHeaders,
       loadingNodes,
       loadingJobs,
+      nodeStatusMessage,
+      jobStatusMessage,
       getUsageColor,
       getStatusColor,
       Math // 添加Math对象以便在模板中使用
