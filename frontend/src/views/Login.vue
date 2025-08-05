@@ -28,13 +28,9 @@
                 :rules="passwordRules"
                 required
                 @keyup.enter="login"
-              >
-                <template v-slot:append>
-                  <v-icon @click="showPassword = !showPassword">
-                    {{ showPassword ? 'mdi-eye' : 'mdi-eye-off' }}
-                  </v-icon>
-                </template>
-              </v-text-field>
+                :append-icon="showPassword ? 'mdi-eye' : 'mdi-eye-off'"
+                @click:append="showPassword = !showPassword"
+              ></v-text-field>
               
               <v-checkbox
                 v-model="rememberMe"
