@@ -141,7 +141,6 @@ export default {
         
         websocket.onclose = () => {
           isConnected.value = false
-          isLoggedIn.value = false
           terminal.write('\x1b[31m\n\rConnection closed\x1b[0m\r\n')
         }
         
@@ -160,7 +159,6 @@ export default {
         websocket = null
       }
       isConnected.value = false
-      isLoggedIn.value = false
     }
     
     // 发送输入到终端
