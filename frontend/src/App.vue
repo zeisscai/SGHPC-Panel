@@ -4,36 +4,6 @@
     
     <v-main>
       <v-container fluid>
-```
-
-App.vue
-```vue
-<<<<<<< SEARCH
-    const showPasswordAlert = ref(false)
-    
-    // 检查是否需要显示密码修改提醒
-    const checkPasswordAlert = () => {
-      const shouldChangePassword = localStorage.getItem('shouldChangePassword')
-      showPasswordAlert.value = shouldChangePassword === 'true'
-    }
-    
-    const closePasswordAlert = () => {
-      showPasswordAlert.value = false
-      localStorage.removeItem('shouldChangePassword')
-    }
-    
-    const goToSettings = () => {
-      router.push('/settings')
-      closePasswordAlert()
-    }
-```
-
-App.vue
-```vue
-<<<<<<< SEARCH
-      checkPasswordAlert()
-      // 检查认证状态等
-        
         <router-view v-slot="{ Component }">
           <transition name="fade" mode="out-in">
             <component :is="Component" />
@@ -56,30 +26,13 @@ export default {
   },
   setup() {
     const router = useRouter()
-    const showPasswordAlert = ref(false)
-    
-    // 检查是否需要显示密码修改提醒
-    const checkPasswordAlert = () => {
-      const shouldChangePassword = localStorage.getItem('shouldChangePassword')
-      showPasswordAlert.value = shouldChangePassword === 'true'
-    }
-    
-    const closePasswordAlert = () => {
-      showPasswordAlert.value = false
-      localStorage.removeItem('shouldChangePassword')
-    }
-    
-    const goToSettings = () => {
-      router.push('/settings')
-      closePasswordAlert()
-    }
     
     onMounted(() => {
-      checkPasswordAlert()
+      // 检查认证状态等
     })
     
     return {
-      router,
+      router
     }
   },
   data: () => ({
@@ -120,8 +73,6 @@ export default {
     if (this.autoLogoutInterval) {
       clearInterval(this.autoLogoutInterval)
     }
-  },
-  watch: {
   }
 }
 </script>
@@ -144,5 +95,85 @@ export default {
 .v-theme--dark {
   background-color: #121212;
   color: #ffffff;
+}
+
+.v-list-item--active {
+  background-color: rgba(25, 118, 210, 0.1) !important;
+}
+
+.v-list-group--active > .v-list-group__header {
+  background-color: rgba(25, 118, 210, 0.1) !important;
+}
+
+/* 侧边栏图标样式 */
+.sidebar-icon {
+  background-color: transparent !important;
+  border-radius: 0 !important;
+  margin-right: 16px !important;
+}
+
+/* 子菜单项样式 */
+.submenu-item {
+  padding-left: 40px !important; /* 与父级菜单对齐 */
+}
+
+.submenu-item .v-list-item__prepend {
+  margin-right: 16px !important;
+}
+
+/* 确保所有列表项的一致性 */
+.v-list-item {
+  display: flex !important;
+  align-items: center !important;
+  padding-left: 16px !important;
+  padding-right: 16px !important;
+}
+
+/* 确保子菜单项没有额外缩进 */
+.v-list-group--items {
+  padding-inline-start: 0 !important;
+  padding-left: 0 !important;
+}
+
+.v-list-group--items .v-list-item {
+  padding-left: 0 !important;
+  padding-inline-start: 0 !important;
+}
+
+/* 确保prepend区域正确对齐 */
+.v-list-item__prepend {
+  margin-right: 16px !important;
+  align-self: center !important;
+}
+
+/* 移除prepend区域的spacer */
+.v-list-item__prepend .v-list-item__spacer {
+  display: none !important;
+}
+
+.v-list-item__append .v-list-item__spacer {
+  display: none !important;
+}
+
+/* 确保子菜单图标正确对齐 */
+.submenu-icon {
+  margin-left: 0 !important;
+}
+
+/* 折叠图标样式 */
+.v-list-group__header .v-icon {
+  background-color: transparent !important;
+}
+
+/* 悬停效果 */
+.v-list-item:hover .sidebar-icon {
+  background-color: transparent !important;
+}
+
+/* 确保文字对齐 */
+.v-list-item-title {
+  align-self: center !important;
+  flex: 1 !important;
+  padding-left: 0 !important;
 }
 </style>
