@@ -1,56 +1,73 @@
 <template>
-  <v-container class="fill-height" fluid>
+  <v-container class="fill-height login-container" fluid>
     <v-row align="center" justify="center">
-      <v-col cols="12" sm="8" md="6" lg="4">
-        <v-card class="elevation-12">
-          <v-toolbar color="primary" dark flat>
-            <v-toolbar-title>SGHPC Panel Login</v-toolbar-title>
+      <v-col cols="12" sm="10" md="8" lg="5">
+        <v-card class="login-card elevation-12">
+          <v-toolbar color="primary" dark flat class="toolbar">
+            <v-toolbar-title class="text-h5 font-weight-bold text-center w-100">
+              SGHPC Panel Login
+            </v-toolbar-title>
           </v-toolbar>
-          <v-card-text>
+          
+          <v-card-text class="pa-8">
             <v-form ref="loginForm" v-model="valid" @submit.prevent="login">
               <v-text-field
                 v-model="username"
                 label="Username"
                 name="username"
-                prepend-icon="mdi-account"
+                prepend-inner-icon="mdi-account"
                 type="text"
                 :rules="usernameRules"
                 required
                 @keyup.enter="login"
+                variant="outlined"
+                class="mb-4"
+                clearable
               ></v-text-field>
 
               <v-text-field
                 v-model="password"
                 label="Password"
                 name="password"
-                prepend-icon="mdi-lock"
+                prepend-inner-icon="mdi-lock"
                 :type="showPassword ? 'text' : 'password'"
                 :rules="passwordRules"
                 required
                 @keyup.enter="login"
-                :append-icon="showPassword ? 'mdi-eye' : 'mdi-eye-off'"
-                @click:append="showPassword = !showPassword"
+                :append-inner-icon="showPassword ? 'mdi-eye' : 'mdi-eye-off'"
+                @click:append-inner="showPassword = !showPassword"
+                variant="outlined"
+                class="mb-4"
+                clearable
               ></v-text-field>
               
               <v-checkbox
                 v-model="rememberMe"
                 label="Remember me"
-                class="mt-2"
+                color="primary"
+                class="mb-6"
+                hide-details
               ></v-checkbox>
+              
+              <v-btn 
+                color="primary" 
+                @click="login"
+                :disabled="!valid || loading"
+                :loading="loading"
+                block
+                size="large"
+                class="login-btn"
+                rounded="lg"
+              >
+                <span class="text-body-1 font-weight-bold">Login</span>
+              </v-btn>
             </v-form>
           </v-card-text>
-          <v-card-actions class="pa-6">
-            <v-spacer></v-spacer>
-            <v-btn 
-              color="primary" 
-              @click="login"
-              :disabled="!valid"
-              :loading="loading"
-            >
-              Login
-            </v-btn>
-          </v-card-actions>
         </v-card>
+        
+        <div class="text-center text-caption text-medium-emphasis mt-6">
+          © {{ new Date().getFullYear() }} SGHPC Panel - HPC Cluster Management
+        </div>
       </v-col>
     </v-row>
   </v-container>
@@ -133,12 +150,58 @@ export default {
 </script>
 
 <style scoped>
-.v-card {
-  border-radius: 12px !important;
+.login-container {
+  background: linear-gradient(135deg, #1e88e5, #0d47a1);
+  min-height: 100vh;
 }
 
-.v-toolbar {
-  border-top-left-radius: 12px !important;
-  border-top-right-radius: 12px !important;
+.login-card {
+  border-radius: 16px !important;
+  overflow: hidden;
+  backdrop-filter: blur(10px);
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.toolbar {
+  border-top-left-radius: 16px !important;
+  border-top-right-radius: 16px !important;
+}
+
+.login-btn {
+  text-transform: none !important;
+  letter-spacing: 1px;
+  box-shadow: 0 4px 6px rgba(32, 33, 36, 0.28) !important;
+  transition: all 0.3s ease;
+}
+
+.login-btn:hover {
+  box-shadow: 0 6px 12px rgba(32, 33, 36, 0.35) !important;
+  transform: translateY(-1px);
+}
+
+:deep(.v-field--variant-outlined .v-field__outline__start) {
+  border-radius: 8px 0 0 8px !important;
+}
+
+:deep(.v-field--variant-outlined .v-field__outline__end) {
+  border-radius: 0 8px 8px 0 !important;
+}
+
+:deep(.v-input__prepend-inner) {
+  margin-right: 12px !important;
+}
+
+:deep(.v-input__append-inner) {
+  margin-left: 6px !important;
+}
+
+@media (max-width: 600px) {
+  .login-card {
+    margin: 16px;
+  }
+  
+  .pa-8 {
+    padding: 24px !important;
+  }
 }
 </style>
