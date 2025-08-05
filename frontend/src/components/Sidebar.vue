@@ -28,7 +28,12 @@
         <template v-slot:prepend>
           <v-icon class="sidebar-icon">mdi-view-dashboard</v-icon>
         </template>
-        <v-list-item-title>Overview</v-list-item-title>
+        <v-list-item-title v-if="!isRail">Overview</v-list-item-title>
+        <v-tooltip
+          v-if="isRail"
+          activator="parent"
+          location="right"
+        >Overview</v-tooltip>
       </v-list-item>
       
       <v-list-group value="system" class="list-group">
@@ -56,7 +61,12 @@
           <template v-slot:prepend>
             <v-icon size="small" class="submenu-icon">mdi-console</v-icon>
           </template>
-          <v-list-item-title>Terminal</v-list-item-title>
+          <v-list-item-title v-if="!isRail">Terminal</v-list-item-title>
+          <v-tooltip
+            v-if="isRail"
+            activator="parent"
+            location="right"
+          >Terminal</v-tooltip>
         </v-list-item>
         
         <v-list-item
@@ -69,22 +79,14 @@
           <template v-slot:prepend>
             <v-icon size="small" class="submenu-icon">mdi-file-document-multiple</v-icon>
           </template>
-          <v-list-item-title>Files</v-list-item-title>
+          <v-list-item-title v-if="!isRail">File Management</v-list-item-title>
+          <v-tooltip
+            v-if="isRail"
+            activator="parent"
+            location="right"
+          >File Management</v-tooltip>
         </v-list-item>
       </v-list-group>
-      
-      <v-list-item
-        link
-        to="/settings"
-        :active="$route.path === '/settings'"
-        class="sidebar-item"
-        :ripple="false"
-      >
-        <template v-slot:prepend>
-          <v-icon class="sidebar-icon">mdi-wrench</v-icon>
-        </template>
-        <v-list-item-title>Settings</v-list-item-title>
-      </v-list-item>
     </v-list>
     
     <template v-slot:append>
@@ -93,10 +95,27 @@
           block
           color="error"
           @click="logout"
+          :variant="isRail ? 'icon' : 'flat'"
         >
-          <v-icon start>mdi-logout</v-icon>
-          Logout
+          <v-icon :start="!isRail">mdi-logout</v-icon>
+          <span v-if="!isRail">Logout</span>
+          <v-tooltip
+            v-if="isRail"
+            activator="parent"
+            location="right"
+          >Logout</v-tooltip>
         </v-btn>
+        
+        <div v-if="isRail" class="d-flex justify-center mt-2">
+          <v-btn 
+            icon 
+            @click="toggleRail"
+            size="small"
+            variant="text"
+          >
+            <v-icon>mdi-chevron-double-right</v-icon>
+          </v-btn>
+        </div>
       </div>
     </template>
   </v-navigation-drawer>

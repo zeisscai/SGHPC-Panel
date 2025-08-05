@@ -4,7 +4,6 @@ import System from '../views/System.vue'
 import Terminal from '../views/Terminal.vue'
 import FileManagement from '../views/FileManagement.vue'
 import Login from '../views/Login.vue'
-import Settings from '../views/Settings.vue'
 
 const routes = [
   {
@@ -17,12 +16,6 @@ const routes = [
     path: '/',
     name: 'Overview',
     component: Overview,
-    meta: { requiresAuth: true }
-  },
-  {
-    path: '/settings',
-    name: 'Settings',
-    component: Settings,
     meta: { requiresAuth: true }
   },
   {

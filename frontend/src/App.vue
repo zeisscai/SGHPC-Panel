@@ -4,27 +4,35 @@
     
     <v-main>
       <v-container fluid>
-        <v-alert
-          v-if="showPasswordAlert"
-          type="warning"
-          dismissible
-          class="ma-4"
-          @input="closePasswordAlert"
-        >
-          <div class="d-flex align-center">
-            <div class="flex-grow-1">
-              <div class="font-weight-bold">Security Warning</div>
-              <div>You are using the default password. Please change it immediately for security reasons.</div>
-            </div>
-            <v-btn
-              color="white"
-              text
-              @click="goToSettings"
-            >
-              Change Password
-            </v-btn>
-          </div>
-        </v-alert>
+```
+
+App.vue
+```vue
+<<<<<<< SEARCH
+    const showPasswordAlert = ref(false)
+    
+    // 检查是否需要显示密码修改提醒
+    const checkPasswordAlert = () => {
+      const shouldChangePassword = localStorage.getItem('shouldChangePassword')
+      showPasswordAlert.value = shouldChangePassword === 'true'
+    }
+    
+    const closePasswordAlert = () => {
+      showPasswordAlert.value = false
+      localStorage.removeItem('shouldChangePassword')
+    }
+    
+    const goToSettings = () => {
+      router.push('/settings')
+      closePasswordAlert()
+    }
+```
+
+App.vue
+```vue
+<<<<<<< SEARCH
+      checkPasswordAlert()
+      // 检查认证状态等
         
         <router-view v-slot="{ Component }">
           <transition name="fade" mode="out-in">
@@ -72,10 +80,6 @@ export default {
     
     return {
       router,
-      showPasswordAlert,
-      checkPasswordAlert,
-      closePasswordAlert,
-      goToSettings
     }
   },
   data: () => ({
@@ -118,12 +122,6 @@ export default {
     }
   },
   watch: {
-    // 监听路由变化，检查是否需要显示密码提醒
-    '$route'() {
-      this.$nextTick(() => {
-        this.checkPasswordAlert()
-      })
-    }
   }
 }
 </script>
