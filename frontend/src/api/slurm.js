@@ -51,6 +51,16 @@ export async function fetchDeploymentStatus() {
   }
 }
 
+// 获取Slurm服务状态
+export async function fetchSlurmStatus() {
+  try {
+    const response = await apiClient.get('/slurm/status')
+    return response.data.status
+  } catch (error) {
+    throw new Error('Failed to fetch Slurm status')
+  }
+}
+
 // 启动部署
 export async function startDeployment() {
   try {

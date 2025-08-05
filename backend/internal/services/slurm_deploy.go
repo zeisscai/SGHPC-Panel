@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"math/rand"
+	"sync"
 	
 	"panel-tool/internal/models"
 	"panel-tool/internal/utils"
@@ -19,6 +21,7 @@ type SlurmDeployService struct {
 	status         *models.SlurmDeploymentStatus
 	logs           []string
 	configFilePath string
+	mu             sync.Mutex
 }
 
 // NewSlurmDeployService 创建新的Slurm部署服务实例
@@ -69,17 +72,58 @@ func (s *SlurmDeployService) GetStatus() *models.SlurmDeploymentStatus {
 
 // GetLogs 获取部署日志
 func (s *SlurmDeployService) GetLogs() []string {
-	return s.logs
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// 返回日志的副本
+	logsCopy := make([]string, len(s.logs))
+	copy(logsCopy, s.logs)
+	return logsCopy
+}
+
+// CheckSlurmStatus 检查Slurm状态
+func (s *SlurmDeployService) CheckSlurmStatus() string {
+	// 检查slurmctld是否已安装
+	_, err := os.Stat("/usr/sbin/slurmctld")
+	if os.IsNotExist(err) {
+		return "not_installed"
+	}
+	
+	// 检查slurmctld服务是否正在运行
+	cmd := exec.Command("systemctl", "is-active", "slurmctld")
+	output, err := cmd.Output()
+	if err != nil {
+		return "stopped"
+	}
+	
+	status := strings.TrimSpace(string(output))
+	if status == "active" {
+		return "running"
+	}
+	
+	return "stopped"
 }
 
 // addLog 添加日志
 func (s *SlurmDeployService) addLog(message string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	
 	logEntry := fmt.Sprintf("[%s] %s", time.Now().Format("2006-01-02 15:04:05"), message)
 	s.logs = append(s.logs, logEntry)
 	
 	// 使用Logger记录日志
 	logger := utils.NewLogger()
 	logger.Info(logEntry)
+}
+
+// generatePassword 生成指定长度的随机密码
+func generatePassword(length int) string {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*"
+	password := make([]byte, length)
+	for i := range password {
+		password[i] = charset[rand.Intn(len(charset))]
+	}
+	return string(password)
 }
 
 // Deploy 执行Slurm部署
@@ -170,27 +214,48 @@ func (s *SlurmDeployService) checkEnvironment() error {
 	if _, err := os.Stat("/etc/openeuler-release"); os.IsNotExist(err) {
 		// 如果没有openeuler-release文件，尝试检查os-release
 		if _, err := os.Stat("/etc/os-release"); os.IsNotExist(err) {
-			return fmt.Errorf("当前系统不是OpenEuler发行版")
+			return fmt.Errorf("当前系统不是OpenEuler或Rocky Linux发行版")
 		}
 		
-		// 检查os-release中是否包含openEuler标识
+		// 检查os-release中是否包含openEuler或Rocky Linux标识
 		data, err := os.ReadFile("/etc/os-release")
 		if err != nil {
 			return fmt.Errorf("无法读取系统版本信息: %v", err)
 		}
 		
 		content := string(data)
-		if !strings.Contains(content, "openEuler") {
-			return fmt.Errorf("当前系统不是OpenEuler发行版")
+		isOpenEuler := strings.Contains(content, "openEuler")
+		isRockyLinux := strings.Contains(content, "Rocky Linux")
+		
+		if !isOpenEuler && !isRockyLinux {
+			return fmt.Errorf("当前系统不是OpenEuler或Rocky Linux发行版")
 		}
 		
-		// 检查版本号
-		versionPattern := regexp.MustCompile(`VERSION="?(24\.0[0-9]|24\.[1-9][0-9]*)`)
-		if !versionPattern.MatchString(content) {
-			return fmt.Errorf("当前系统版本不是OpenEuler 24，实际版本信息: %s", content)
+		if isOpenEuler {
+			// 检查OpenEuler版本号 (要求24以上)
+			versionPattern := regexp.MustCompile(`VERSION="?(24\.0[0-9]|24\.[1-9][0-9]*)`)
+			if !versionPattern.MatchString(content) {
+				return fmt.Errorf("当前OpenEuler系统版本不是24以上，实际版本信息: %s", content)
+			}
+			s.addLog("检测到系统为OpenEuler发行版，版本符合要求")
+		} else if isRockyLinux {
+			// 检查Rocky Linux版本号 (要求9.4以上)
+			versionPattern := regexp.MustCompile(`VERSION="9\.4|VERSION="[0-9][0-9]\.`)
+			if !versionPattern.MatchString(content) {
+				// 更精确的匹配
+				versionLinePattern := regexp.MustCompile(`VERSION="([0-9]+\.[0-9]+)`)
+				matches := versionLinePattern.FindStringSubmatch(content)
+				if len(matches) > 1 {
+					version := matches[1]
+					if version < "9.4" {
+						return fmt.Errorf("当前Rocky Linux系统版本不是9.4以上，实际版本: %s", version)
+					}
+				} else {
+					return fmt.Errorf("无法确定Rocky Linux版本，实际版本信息: %s", content)
+				}
+			}
+			s.addLog("检测到系统为Rocky Linux发行版，版本符合要求")
 		}
-		
-		s.addLog("检测到系统为OpenEuler发行版，版本符合要求")
 	} else {
 		// 检查openeuler-release文件
 		data, err := os.ReadFile("/etc/openeuler-release")
@@ -199,39 +264,36 @@ func (s *SlurmDeployService) checkEnvironment() error {
 		}
 
 		version := strings.TrimSpace(string(data))
-		s.addLog(fmt.Sprintf("检测到系统版本: %s", version))
-
-		// 根据搜索结果，OpenEuler 24版本可能显示为24.03等
-		if !strings.Contains(version, "24.") {
-			return fmt.Errorf("当前系统版本不是OpenEuler 24，实际版本: %s", version)
+		versionPattern := regexp.MustCompile(`(24\.0[0-9]|24\.[1-9][0-9]*)`)
+		if !versionPattern.MatchString(version) {
+			return fmt.Errorf("当前系统版本不是OpenEuler 24，实际版本信息: %s", version)
 		}
+		
+		s.addLog("检测到系统为OpenEuler发行版，版本符合要求")
 	}
-
-	s.addLog("操作系统版本检查通过")
-
-	// 检查必要的命令是否存在
-	commands := []string{"yum", "make", "gcc", "rpmbuild"}
-	for _, cmd := range commands {
-		if _, err := exec.LookPath(cmd); err != nil {
-			return fmt.Errorf("缺少必要命令: %s", cmd)
-		}
+	
+	// 检查依赖
+	s.addLog("检查系统依赖")
+	if _, err := exec.LookPath("wget"); err != nil {
+		s.addLog("警告: wget未安装，将在依赖安装阶段进行安装")
 	}
-
-	s.addLog("必要命令检查通过")
+	
+	if _, err := exec.LookPath("yum"); err != nil {
+		return fmt.Errorf("系统缺少yum包管理器")
+	}
+	
 	return nil
 }
 
 // downloadSource 下载Slurm源码
 func (s *SlurmDeployService) downloadSource() error {
-	// 这里我们使用一个固定的版本，实际项目中可能需要配置
-	slurmVersion := "23.11.4"
-	downloadURL := fmt.Sprintf("https://download.schedmd.com/slurm/slurm-%s.tar.bz2", slurmVersion)
-	sourceDir := "/tmp/slurm-source"
+	const (
+		slurmVersion = "23.11.4"
+		downloadURL  = "https://download.schedmd.com/slurm/slurm-23.11.4.tar.bz2"
+		sourceDir    = "/tmp/slurm_source"
+	)
 
-	// 清理旧的源码目录
-	if err := os.RemoveAll(sourceDir); err != nil {
-		s.addLog(fmt.Sprintf("警告: 无法清理旧源码目录: %v", err))
-	}
+	s.addLog(fmt.Sprintf("准备下载Slurm %s", slurmVersion))
 
 	// 创建源码目录
 	if err := os.MkdirAll(sourceDir, 0755); err != nil {
@@ -350,16 +412,133 @@ func (s *SlurmDeployService) compileAndInstall() error {
 		return fmt.Errorf("安装失败: %v, 输出: %s", err, string(output))
 	}
 
-	s.addLog("Slurm编译安装完成")
+	s.addLog("编译和安装完成")
 	return nil
 }
 
 // configureService 配置Slurm服务
 func (s *SlurmDeployService) configureService() error {
-	// 生成基础配置文件
-	s.addLog("正在生成slurm.conf配置文件")
-	slurmConf := fmt.Sprintf(`
-# Slurm configuration generated by SGHPC-Panel
+	s.addLog("开始配置Slurm服务")
+	
+	// 生成数据库密码
+	dbPassword := generatePassword(10)
+	s.addLog(fmt.Sprintf("生成数据库密码: %s", dbPassword))
+	s.addLog("重要提醒: 请保存好数据库密码，20秒后将继续安装")
+	
+	// 等待20秒
+	time.Sleep(20 * time.Second)
+	
+	// 配置munge
+	s.addLog("配置Munge服务")
+	if err := s.configureMunge(); err != nil {
+		return fmt.Errorf("配置Munge失败: %v", err)
+	}
+	
+	// 配置数据库
+	s.addLog("配置Slurm数据库")
+	if err := s.configureDatabase(dbPassword); err != nil {
+		return fmt.Errorf("配置数据库失败: %v", err)
+	}
+	
+	// 创建基础配置文件
+	s.addLog("创建Slurm配置文件")
+	if err := s.createSlurmConfig(); err != nil {
+		return fmt.Errorf("创建配置文件失败: %v", err)
+	}
+	
+	// 启用并启动服务
+	s.addLog("启用并启动Slurm服务")
+	cmd := exec.Command("systemctl", "enable", "slurmctld")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		s.addLog(fmt.Sprintf("警告: 启用slurmctld服务失败: %v, 输出: %s", err, string(output)))
+	}
+	
+	cmd = exec.Command("systemctl", "start", "slurmctld")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		s.addLog(fmt.Sprintf("警告: 启动slurmctld服务失败: %v, 输出: %s", err, string(output)))
+	}
+	
+	s.addLog("服务配置完成")
+	return nil
+}
+
+// configureMunge 配置Munge服务
+func (s *SlurmDeployService) configureMunge() error {
+	// 生成munge密钥
+	s.addLog("生成Munge密钥")
+	cmd := exec.Command("dd", "if=/dev/urandom", "of=/etc/munge/munge.key", "bs=1", "count=1024")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("生成munge密钥失败: %v, 输出: %s", err, string(output))
+	}
+	
+	// 设置权限
+	cmd = exec.Command("chown", "munge:munge", "/etc/munge/munge.key")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("设置munge密钥权限失败: %v, 输出: %s", err, string(output))
+	}
+	
+	cmd = exec.Command("chmod", "0600", "/etc/munge/munge.key")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("设置munge密钥权限失败: %v, 输出: %s", err, string(output))
+	}
+	
+	// 启动munge服务
+	s.addLog("启动Munge服务")
+	cmd = exec.Command("systemctl", "enable", "munge")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		s.addLog(fmt.Sprintf("警告: 启用munge服务失败: %v, 输出: %s", err, string(output)))
+	}
+	
+	cmd = exec.Command("systemctl", "start", "munge")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("启动munge服务失败: %v, 输出: %s", err, string(output))
+	}
+	
+	return nil
+}
+
+// configureDatabase 配置数据库
+func (s *SlurmDeployService) configureDatabase(password string) error {
+	s.addLog("安装MariaDB")
+	cmd := exec.Command("yum", "install", "-y", "mariadb-server", "mariadb-devel")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("安装MariaDB失败: %v, 输出: %s", err, string(output))
+	}
+	
+	s.addLog("启动MariaDB服务")
+	cmd = exec.Command("systemctl", "enable", "mariadb")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		s.addLog(fmt.Sprintf("警告: 启用mariadb服务失败: %v, 输出: %s", err, string(output)))
+	}
+	
+	cmd = exec.Command("systemctl", "start", "mariadb")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("启动mariadb服务失败: %v, 输出: %s", err, string(output))
+	}
+	
+	// 创建slurm数据库和用户
+	s.addLog("创建Slurm数据库和用户")
+	dbCommands := []string{
+		fmt.Sprintf("CREATE DATABASE IF NOT EXISTS slurm_acct_db;"),
+		fmt.Sprintf("CREATE USER IF NOT EXISTS 'slurm'@'localhost' IDENTIFIED BY '%s';", password),
+		fmt.Sprintf("GRANT ALL ON slurm_acct_db.* TO 'slurm'@'localhost';"),
+		"FLUSH PRIVILEGES;",
+	}
+	
+	for _, command := range dbCommands {
+		cmd = exec.Command("mysql", "-e", command)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			s.addLog(fmt.Sprintf("警告: 执行数据库命令失败: %s, 输出: %s", command, string(output)))
+		}
+	}
+	
+	return nil
+}
+
+// createSlurmConfig 创建基础Slurm配置文件
+func (s *SlurmDeployService) createSlurmConfig() error {
+	configContent := fmt.Sprintf(`# Slurm配置文件
 ClusterName=%s
 ControlMachine=%s
 ControlAddr=%s
@@ -376,8 +555,9 @@ ProctrackType=%s
 ReturnToService=%d
 MaxTime=%s
 
-# 计算节点配置
-%s
+# 节点配置
+NodeName=%s CPUs=4 State=UNKNOWN
+PartitionName=debug Nodes=%s Default=YES MaxTime=INFINITE State=UP
 `,
 		s.config.ClusterName,
 		s.config.ControlMachine,
@@ -394,85 +574,30 @@ MaxTime=%s
 		s.config.ProctrackType,
 		s.config.ReturnToService,
 		s.config.MaxTime,
-		s.generateNodeConfig(),
+		s.config.ControlMachine,
+		s.config.ControlMachine,
 	)
-
+	
 	// 写入配置文件
-	confPath := "/etc/slurm/slurm.conf"
-	if err := os.MkdirAll("/etc/slurm", 0755); err != nil {
-		return fmt.Errorf("创建配置目录失败: %v", err)
+	if err := os.WriteFile("/etc/slurm/slurm.conf", []byte(configContent), 0644); err != nil {
+		return fmt.Errorf("写入slurm.conf失败: %v", err)
 	}
-
-	if err := os.WriteFile(confPath, []byte(slurmConf), 0644); err != nil {
-		return fmt.Errorf("写入配置文件失败: %v", err)
+	
+	// 创建cgroup配置
+	cgroupContent := `# Cgroup配置
+CgroupAutomount=yes
+CgroupReleaseAgentDir="/etc/slurm/cgroup"
+ConstrainCores=yes
+ConstrainRAMSpace=yes
+`
+	
+	if err := os.MkdirAll("/etc/slurm/cgroup", 0755); err != nil {
+		s.addLog(fmt.Sprintf("警告: 创建cgroup目录失败: %v", err))
 	}
-
-	// 设置配置文件权限
-	os.Chown(confPath, 930, 930)
-	s.addLog("slurm.conf配置文件生成完成")
-
-	// 启用并启动munge服务
-	s.addLog("正在启用并启动munge服务")
-	cmd := exec.Command("systemctl", "enable", "munge")
-	if output, err := cmd.CombinedOutput(); err != nil {
-		s.addLog(fmt.Sprintf("警告: 启用munge服务失败: %v, 输出: %s", err, string(output)))
+	
+	if err := os.WriteFile("/etc/slurm/cgroup.conf", []byte(cgroupContent), 0644); err != nil {
+		s.addLog(fmt.Sprintf("警告: 写入cgroup.conf失败: %v", err))
 	}
-
-	cmd = exec.Command("systemctl", "start", "munge")
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("启动munge服务失败: %v, 输出: %s", err, string(output))
-	}
-
-	// 启用并启动slurmctld服务
-	s.addLog("正在启用并启动slurmctld服务")
-	cmd = exec.Command("systemctl", "enable", "slurmctld")
-	if output, err := cmd.CombinedOutput(); err != nil {
-		s.addLog(fmt.Sprintf("警告: 启用slurmctld服务失败: %v, 输出: %s", err, string(output)))
-	}
-
-	cmd = exec.Command("systemctl", "start", "slurmctld")
-	if output, err := cmd.CombinedOutput(); err != nil {
-		s.addLog(fmt.Sprintf("警告: 启动slurmctld服务失败: %v, 输出: %s", err, string(output)))
-	}
-
-	s.addLog("Slurm服务配置完成")
+	
 	return nil
-}
-
-// generateNodeConfig 生成计算节点配置
-func (s *SlurmDeployService) generateNodeConfig() string {
-	var nodesConfig strings.Builder
-	for _, node := range s.config.ComputeNodes {
-		nodesConfig.WriteString(fmt.Sprintf("NodeName=%s NodeAddr=%s CPUs=%d State=UNKNOWN\n",
-			node, node, 8)) // 这里使用默认的CPU数量，实际应该动态获取
-	}
-
-	// 添加分区配置
-	nodesConfig.WriteString(fmt.Sprintf("\nPartitionName=debug Nodes=%s Default=YES MaxTime=INFINITE State=UP\n",
-		strings.Join(s.config.ComputeNodes, ",")))
-
-	return nodesConfig.String()
-}
-
-// ControlSlurmService 控制Slurm服务
-func ControlSlurmService(action string) (string, error) {
-	var cmd *exec.Cmd
-	
-	switch action {
-	case "start":
-		cmd = exec.Command("systemctl", "start", "slurmctld")
-	case "stop":
-		cmd = exec.Command("systemctl", "stop", "slurmctld")
-	case "restart":
-		cmd = exec.Command("systemctl", "restart", "slurmctld")
-	default:
-		return "", fmt.Errorf("无效的操作: %s", action)
-	}
-	
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("执行命令失败: %v, 输出: %s", err, string(output))
-	}
-	
-	return string(output), nil
 }

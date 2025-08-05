@@ -1,6 +1,7 @@
 package services
 
 import (
+	"os/exec"
 	"time"
 	"panel-tool/internal/models"
 )
@@ -36,4 +37,23 @@ func GetSlurmJobs() []models.JobModel {
 	}
 
 	return jobs
+}
+
+// ControlSlurmService 控制Slurm服务
+func ControlSlurmService(action string) (string, error) {
+	var cmd *exec.Cmd
+	
+	switch action {
+	case "start":
+		cmd = exec.Command("systemctl", "start", "slurmctld")
+	case "stop":
+		cmd = exec.Command("systemctl", "stop", "slurmctld")
+	case "restart":
+		cmd = exec.Command("systemctl", "restart", "slurmctld")
+	default:
+		return "", &exec.ExitError{}
+	}
+	
+	output, err := cmd.CombinedOutput()
+	return string(output), err
 }

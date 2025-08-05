@@ -8,116 +8,119 @@
             Slurm Deployment
           </v-card-title>
           <v-card-text>
-            <v-alert
-              v-if="deploymentStatus.phase === 'failed'"
-              type="error"
-              outlined
-            >
-              <strong>Deployment Failed:</strong> {{ deploymentStatus.error_message }}
-            </v-alert>
-            
-            <v-alert
-              v-if="deploymentStatus.phase === 'finished'"
-              type="success"
-              outlined
-            >
-              <strong>Deployment Completed Successfully!</strong>
-            </v-alert>
-            
-            <v-row>
-              <v-col cols="12" md="6">
-                <v-card outlined>
-                  <v-card-title>Deployment Status</v-card-title>
+            <v-tabs v-model="activeTab" fixed-tabs>
+              <v-tab key="status">Slurm Status</v-tab>
+              <v-tab key="clientStatus">Slurm Client Status</v-tab>
+              <v-tab key="log">Deployment Log</v-tab>
+            </v-tabs>
+
+            <v-tabs-items v-model="activeTab">
+              <!-- Slurm Status Tab -->
+              <v-tab-item key="status">
+                <v-card flat>
                   <v-card-text>
-                    <v-progress-linear
-                      :value="deploymentStatus.progress"
-                      :color="getProgressColor(deploymentStatus.phase)"
-                      height="25"
-                      striped
+                    <v-alert
+                      v-if="slurmStatus === 'not_installed'"
+                      type="info"
+                      outlined
+                      colored-border
+                      border="left"
                     >
-                      <strong>{{ deploymentStatus.progress }}%</strong>
-                    </v-progress-linear>
+                      <strong>Slurmctld:</strong> 未安装
+                    </v-alert>
                     
-                    <v-list>
-                      <v-list-item>
-                        <v-list-item-title>Phase</v-list-item-title>
-                        <v-list-item-subtitle>{{ deploymentStatus.phase }}</v-list-item-subtitle>
-                      </v-list-item>
-                      <v-list-item>
-                        <v-list-item-title>Message</v-list-item-title>
-                        <v-list-item-subtitle>{{ deploymentStatus.message }}</v-list-item-subtitle>
-                      </v-list-item>
-                      <v-list-item>
-                        <v-list-item-title>Start Time</v-list-item-title>
-                        <v-list-item-subtitle>{{ deploymentStatus.start_time }}</v-list-item-subtitle>
-                      </v-list-item>
-                      <v-list-item v-if="deploymentStatus.end_time">
-                        <v-list-item-title>End Time</v-list-item-title>
-                        <v-list-item-subtitle>{{ deploymentStatus.end_time }}</v-list-item-subtitle>
-                      </v-list-item>
-                    </v-list>
+                    <v-alert
+                      v-else-if="slurmStatus === 'running'"
+                      type="success"
+                      outlined
+                      colored-border
+                      border="left"
+                    >
+                      <strong>Slurmctld:</strong> 正在运行
+                    </v-alert>
+                    
+                    <v-alert
+                      v-else-if="slurmStatus === 'stopped'"
+                      type="error"
+                      outlined
+                      colored-border
+                      border="left"
+                    >
+                      <strong>Slurmctld:</strong> 未运行
+                    </v-alert>
+                    
+                    <v-row class="mt-4">
+                      <v-col cols="12">
+                        <div v-if="slurmStatus === 'not_installed'">
+                          <v-btn
+                            color="primary"
+                            @click="startInstallation"
+                            :loading="isInstalling"
+                          >
+                            <v-icon left>mdi-download</v-icon>
+                            开始安装
+                          </v-btn>
+                        </div>
+                        
+                        <div v-else>
+                          <v-btn
+                            color="warning"
+                            @click="controlService('restart')"
+                            class="mr-2"
+                          >
+                            <v-icon left>mdi-restart</v-icon>
+                            重启
+                          </v-btn>
+                          <v-btn
+                            color="error"
+                            @click="controlService('stop')"
+                          >
+                            <v-icon left>mdi-stop</v-icon>
+                            停止
+                          </v-btn>
+                        </div>
+                      </v-col>
+                    </v-row>
+                  </v-card-text>
+                </v-card>
+              </v-tab-item>
+
+              <!-- Slurm Client Status Tab -->
+              <v-tab-item key="clientStatus">
+                <v-card flat>
+                  <v-card-text>
+                    <v-alert type="info" outlined>
+                      <p>Slurm客户端状态信息将在此显示</p>
+                    </v-alert>
+                  </v-card-text>
+                </v-card>
+              </v-tab-item>
+
+              <!-- Log Tab -->
+              <v-tab-item key="log">
+                <v-card flat>
+                  <v-card-text>
+                    <v-textarea
+                      outlined
+                      :model-value="formatLogs(deploymentLogs)"
+                      rows="15"
+                      readonly
+                      no-resize
+                      ref="logContainer"
+                    ></v-textarea>
                     
                     <v-btn
-                      color="primary"
-                      @click="startDeployment"
-                      :disabled="isDeploying"
-                      :loading="isDeploying"
+                      color="secondary"
+                      @click="refreshLogs"
+                      class="mt-2"
                     >
-                      <v-icon left>mdi-rocket</v-icon>
-                      Start Deployment
+                      <v-icon left>mdi-refresh</v-icon>
+                      Refresh Logs
                     </v-btn>
                   </v-card-text>
                 </v-card>
-              </v-col>
-              
-              <v-col cols="12" md="6">
-                <v-card outlined>
-                  <v-card-title>Service Control</v-card-title>
-                  <v-card-text>
-                    <v-row>
-                      <v-col cols="12">
-                        <v-btn
-                          color="success"
-                          @click="controlService('start')"
-                          class="mr-2 mb-2"
-                        >
-                          <v-icon left>mdi-play</v-icon>
-                          Start
-                        </v-btn>
-                        <v-btn
-                          color="warning"
-                          @click="controlService('restart')"
-                          class="mr-2 mb-2"
-                        >
-                          <v-icon left>mdi-restart</v-icon>
-                          Restart
-                        </v-btn>
-                        <v-btn
-                          color="error"
-                          @click="controlService('stop')"
-                          class="mr-2 mb-2"
-                        >
-                          <v-icon left>mdi-stop</v-icon>
-                          Stop
-                        </v-btn>
-                      </v-col>
-                    </v-row>
-                    
-                    <v-row>
-                      <v-col cols="12">
-                        <v-textarea
-                          outlined
-                          label="Service Control Output"
-                          :model-value="serviceOutput"
-                          rows="5"
-                          readonly
-                        ></v-textarea>
-                      </v-col>
-                    </v-row>
-                  </v-card-text>
-                </v-card>
-              </v-col>
-            </v-row>
+              </v-tab-item>
+            </v-tabs-items>
           </v-card-text>
         </v-card>
       </v-col>
@@ -205,47 +208,19 @@
         </v-card>
       </v-col>
     </v-row>
-    
-    <v-row>
-      <v-col cols="12">
-        <v-card class="mb-6" elevation="2">
-          <v-card-title>
-            <v-icon left class="mr-2">mdi-file-document</v-icon>
-            Deployment Logs
-          </v-card-title>
-          <v-card-text>
-            <v-textarea
-              outlined
-              :model-value="formatLogs(deploymentLogs)"
-              rows="10"
-              readonly
-              no-resize
-            ></v-textarea>
-            
-            <v-btn
-              color="secondary"
-              @click="refreshLogs"
-              class="mt-2"
-            >
-              <v-icon left>mdi-refresh</v-icon>
-              Refresh Logs
-            </v-btn>
-          </v-card-text>
-        </v-card>
-      </v-col>
-    </v-row>
   </div>
 </template>
 
 <script>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { 
   fetchSlurmConfig, 
   updateSlurmConfig, 
   fetchDeploymentStatus, 
   startDeployment,
   fetchDeploymentLogs,
-  controlSlurmService
+  controlSlurmService,
+  fetchSlurmStatus
 } from '../api/slurm'
 
 export default {
@@ -261,6 +236,12 @@ export default {
       slurmd_port: 6818,
       compute_nodes: []
     })
+    
+    // 活动选项卡
+    const activeTab = ref(0)
+    
+    // Slurm状态 (not_installed, running, stopped)
+    const slurmStatus = ref('not_installed')
     
     // 部署状态
     const deploymentStatus = ref({
@@ -279,29 +260,14 @@ export default {
     const serviceOutput = ref('')
     
     // 状态标志
-    const isDeploying = ref(false)
+    const isInstalling = ref(false)
+    
+    // 日志容器引用
+    const logContainer = ref(null)
     
     // 定时器
     let statusInterval = null
     let logsInterval = null
-    
-    // 获取进度条颜色
-    const getProgressColor = (phase) => {
-      switch (phase) {
-        case 'failed':
-          return 'error'
-        case 'finished':
-          return 'success'
-        case 'checking':
-        case 'downloading':
-        case 'installing_deps':
-        case 'compiling':
-        case 'configuring':
-          return 'info'
-        default:
-          return 'primary'
-      }
-    }
     
     // 格式化日志显示
     const formatLogs = (logs) => {
@@ -349,18 +315,19 @@ export default {
       }
     }
     
-    // 启动部署
-    const startDeploymentProcess = async () => {
+    // 启动安装
+    const startInstallation = async () => {
       try {
-        isDeploying.value = true
+        isInstalling.value = true
         await startDeployment()
-        alert('Deployment started successfully')
+        // 自动跳转到日志选项卡
+        activeTab.value = 2
         // 启动状态轮询
         startStatusPolling()
       } catch (error) {
         alert('Failed to start deployment: ' + error.message)
       } finally {
-        isDeploying.value = false
+        isInstalling.value = false
       }
     }
     
@@ -368,6 +335,14 @@ export default {
     const loadDeploymentLogs = async () => {
       try {
         deploymentLogs.value = await fetchDeploymentLogs()
+        // 滚动到底部
+        await nextTick()
+        if (logContainer.value && logContainer.value.$el) {
+          const textarea = logContainer.value.$el.querySelector('textarea')
+          if (textarea) {
+            textarea.scrollTop = textarea.scrollHeight
+          }
+        }
       } catch (error) {
         console.error('Failed to load deployment logs:', error)
       }
@@ -383,8 +358,19 @@ export default {
       try {
         const result = await controlSlurmService(action)
         serviceOutput.value = result.output || 'Command executed successfully'
+        // 更新状态
+        checkSlurmStatus()
       } catch (error) {
         serviceOutput.value = 'Error: ' + error.message
+      }
+    }
+    
+    // 获取Slurm状态
+    const loadSlurmStatus = async () => {
+      try {
+        slurmStatus.value = await fetchSlurmStatus()
+      } catch (error) {
+        console.error('Failed to load Slurm status:', error)
       }
     }
     
@@ -395,7 +381,11 @@ export default {
       if (logsInterval) clearInterval(logsInterval)
       
       // 设置新的定时器
-      statusInterval = setInterval(loadDeploymentStatus, 3000)
+      statusInterval = setInterval(async () => {
+        await loadDeploymentStatus()
+        await loadSlurmStatus()
+      }, 3000)
+      
       logsInterval = setInterval(loadDeploymentLogs, 5000)
     }
     
@@ -416,6 +406,7 @@ export default {
       await loadConfig()
       await loadDeploymentStatus()
       await loadDeploymentLogs()
+      await loadSlurmStatus()
     })
     
     // 组件卸载时清理定时器
@@ -425,16 +416,19 @@ export default {
     
     return {
       slurmConfig,
+      activeTab,
+      slurmStatus,
       deploymentStatus,
       deploymentLogs,
       serviceOutput,
-      isDeploying,
-      getProgressColor,
+      isInstalling,
+      logContainer,
       formatLogs,
       updateConfiguration,
-      startDeployment: startDeploymentProcess,
+      startInstallation,
       refreshLogs,
-      controlService
+      controlService,
+      loadSlurmStatus
     }
   }
 }
@@ -447,5 +441,17 @@ export default {
 
 .v-btn {
   text-transform: none;
+}
+
+:deep(.v-alert__content) strong {
+  color: white;
+}
+
+:deep(.v-alert--outlined.success strong) {
+  color: #4caf50;
+}
+
+:deep(.v-alert--outlined.error strong) {
+  color: #f44336;
 }
 </style>

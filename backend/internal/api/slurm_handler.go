@@ -50,6 +50,16 @@ func HandleGetSlurmDeployStatus(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(status)
 }
 
+// HandleGetSlurmStatus 获取Slurm服务状态
+func HandleGetSlurmStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	status := slurmDeployService.CheckSlurmStatus()
+	response := map[string]string{
+		"status": status,
+	}
+	json.NewEncoder(w).Encode(response)
+}
+
 // HandleStartSlurmDeploy 启动Slurm部署
 func HandleStartSlurmDeploy(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
