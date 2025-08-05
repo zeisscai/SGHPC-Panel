@@ -66,7 +66,7 @@
         </v-card>
         
         <div class="text-center text-caption text-medium-emphasis mt-6">
-          © {{ new Date().getFullYear() }} SGHPC Panel - HPC Cluster Management
+          © {{ new Date().getFullYear() }} SGHPC Panel - SG-HPC Inc.
         </div>
       </v-col>
     </v-row>
@@ -151,15 +151,16 @@ export default {
 
 <style scoped>
 .login-container {
-  background: linear-gradient(135deg, #1e88e5, #0d47a1);
+  background-color: #121212;
   min-height: 100vh;
+  display: flex;
+  align-items: center;
 }
 
 .login-card {
   border-radius: 16px !important;
   overflow: hidden;
-  backdrop-filter: blur(10px);
-  background: rgba(255, 255, 255, 0.95);
+  background: #1e1e1e;
 }
 
 .toolbar {
@@ -170,12 +171,12 @@ export default {
 .login-btn {
   text-transform: none !important;
   letter-spacing: 1px;
-  box-shadow: 0 4px 6px rgba(32, 33, 36, 0.28) !important;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.28) !important;
   transition: all 0.3s ease;
 }
 
 .login-btn:hover {
-  box-shadow: 0 6px 12px rgba(32, 33, 36, 0.35) !important;
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.35) !important;
   transform: translateY(-1px);
 }
 
