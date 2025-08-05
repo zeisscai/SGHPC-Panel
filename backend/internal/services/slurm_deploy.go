@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 	
@@ -165,21 +166,45 @@ func (s *SlurmDeployService) Deploy() error {
 func (s *SlurmDeployService) checkEnvironment() error {
 	s.addLog("检查操作系统版本")
 
-	// 检查是否为OpenEuler 24
+	// 检查是否为OpenEuler发行版
 	if _, err := os.Stat("/etc/openeuler-release"); os.IsNotExist(err) {
-		return fmt.Errorf("当前系统不是OpenEuler发行版")
-	}
+		// 如果没有openeuler-release文件，尝试检查os-release
+		if _, err := os.Stat("/etc/os-release"); os.IsNotExist(err) {
+			return fmt.Errorf("当前系统不是OpenEuler发行版")
+		}
+		
+		// 检查os-release中是否包含openEuler标识
+		data, err := os.ReadFile("/etc/os-release")
+		if err != nil {
+			return fmt.Errorf("无法读取系统版本信息: %v", err)
+		}
+		
+		content := string(data)
+		if !strings.Contains(content, "openEuler") {
+			return fmt.Errorf("当前系统不是OpenEuler发行版")
+		}
+		
+		// 检查版本号
+		versionPattern := regexp.MustCompile(`VERSION="?(24\.0[0-9]|24\.[1-9][0-9]*)`)
+		if !versionPattern.MatchString(content) {
+			return fmt.Errorf("当前系统版本不是OpenEuler 24，实际版本信息: %s", content)
+		}
+		
+		s.addLog("检测到系统为OpenEuler发行版，版本符合要求")
+	} else {
+		// 检查openeuler-release文件
+		data, err := os.ReadFile("/etc/openeuler-release")
+		if err != nil {
+			return fmt.Errorf("无法读取系统版本信息: %v", err)
+		}
 
-	data, err := os.ReadFile("/etc/openeuler-release")
-	if err != nil {
-		return fmt.Errorf("无法读取系统版本信息: %v", err)
-	}
+		version := strings.TrimSpace(string(data))
+		s.addLog(fmt.Sprintf("检测到系统版本: %s", version))
 
-	version := strings.TrimSpace(string(data))
-	s.addLog(fmt.Sprintf("检测到系统版本: %s", version))
-
-	if !strings.Contains(version, "24.00") {
-		return fmt.Errorf("当前系统版本不是OpenEuler 24，实际版本: %s", version)
+		// 根据搜索结果，OpenEuler 24版本可能显示为24.03等
+		if !strings.Contains(version, "24.") {
+			return fmt.Errorf("当前系统版本不是OpenEuler 24，实际版本: %s", version)
+		}
 	}
 
 	s.addLog("操作系统版本检查通过")
