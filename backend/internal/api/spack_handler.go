@@ -83,20 +83,20 @@ func HandleInstallSpack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	// 创建一个 channel 用于传输日志
-	logChan := make(chan string)
-	
-	// 在 goroutine 中执行安装过程
-	go func() {
-		spackService.InstallSpack(logChan)
-	}()
-	
 	// 立即返回响应，表示安装已开始
 	response := map[string]interface{}{
 		"message": "Spack installation started",
 		"status":  "started",
 	}
 	json.NewEncoder(w).Encode(response)
+	
+	// 在 goroutine 中执行安装过程，不阻塞 HTTP 响应
+	go func() {
+		// 创建一个 channel 用于传输日志
+		logChan := make(chan string, 100) // 带缓冲的 channel
+		
+		spackService.InstallSpack(logChan)
+	}()
 }
 
 // HandleGetAvailablePackages 获取可安装的软件包列表
@@ -237,7 +237,7 @@ func HandleSpackInstallLogs(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close()
 
 	// 创建一个 channel 用于传输日志
-	logChan := make(chan string)
+	logChan := make(chan string, 100) // 带缓冲的 channel
 	
 	// 在 goroutine 中执行安装过程
 	go func() {

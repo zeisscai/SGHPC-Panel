@@ -123,17 +123,33 @@ func (s *SpackService) clearInstallLog() {
 
 // InstallSpack 安装 Spack
 func (s *SpackService) InstallSpack(logChan chan<- string) error {
-	defer close(logChan)
-	
 	// 设置安装状态
 	s.installMutex.Lock()
 	if s.installing {
 		s.installMutex.Unlock()
-		logChan <- "安装已在进行中..."
+		if logChan != nil {
+			logChan <- "安装已在进行中..."
+		}
 		return fmt.Errorf("安装已在进行中")
 	}
 	s.installing = true
 	s.installMutex.Unlock()
+	
+	// 确保在函数结束时重置安装状态
+	defer func() {
+		s.installMutex.Lock()
+		s.installing = false
+		s.installMutex.Unlock()
+		
+		// 关闭 channel
+		if logChan != nil {
+			close(logChan)
+		}
+	}()
+	
+	if logChan != nil {
+		logChan <- "开始安装 Spack..."
+	}
 	
 	// 确保在函数结束时重置安装状态
 	defer func() {
@@ -148,14 +164,18 @@ func (s *SpackService) InstallSpack(logChan chan<- string) error {
 
 	// 检查是否已经安装
 	if s.CheckSpackStatus().Installed {
-		logChan <- "Spack 已经安装"
+		if logChan != nil {
+			logChan <- "Spack 已经安装"
+		}
 		s.addInstallLog("Spack 已经安装")
 		s.logger.Info("Spack 已经安装")
 		return nil
 	}
 
 	// 安装依赖
-	logChan <- "正在安装依赖..."
+	if logChan != nil {
+		logChan <- "正在安装依赖..."
+	}
 	s.addInstallLog("正在安装依赖...")
 	s.logger.Info("正在安装依赖")
 	
@@ -176,14 +196,18 @@ func (s *SpackService) InstallSpack(logChan chan<- string) error {
 	}
 
 	for _, dep := range dependencies {
-		logChan <- fmt.Sprintf("正在安装依赖: %s", dep)
+		if logChan != nil {
+			logChan <- fmt.Sprintf("正在安装依赖: %s", dep)
+		}
 		s.addInstallLog(fmt.Sprintf("正在安装依赖: %s", dep))
 		s.logger.Info(fmt.Sprintf("正在安装依赖: %s", dep))
 		
 		cmd := exec.Command("yum", "install", "-y", dep)
 		err := cmd.Run()
 		if err != nil {
-			logChan <- fmt.Sprintf("安装依赖 %s 失败: %v", dep, err)
+			if logChan != nil {
+				logChan <- fmt.Sprintf("安装依赖 %s 失败: %v", dep, err)
+			}
 			s.addInstallLog(fmt.Sprintf("安装依赖 %s 失败: %v", dep, err))
 			s.logger.Error(fmt.Sprintf("安装依赖 %s 失败: %v", dep, err))
 			return fmt.Errorf("安装依赖 %s 失败: %v", dep, err)
@@ -191,13 +215,17 @@ func (s *SpackService) InstallSpack(logChan chan<- string) error {
 	}
 
 	// 下载并安装 Spack
-	logChan <- "正在下载 Spack..."
+	if logChan != nil {
+		logChan <- "正在下载 Spack..."
+	}
 	s.addInstallLog("正在下载 Spack...")
 	s.logger.Info("正在下载 Spack")
 	
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		logChan <- fmt.Sprintf("获取用户主目录失败: %v", err)
+		if logChan != nil {
+			logChan <- fmt.Sprintf("获取用户主目录失败: %v", err)
+		}
 		s.addInstallLog(fmt.Sprintf("获取用户主目录失败: %v", err))
 		s.logger.Error(fmt.Sprintf("获取用户主目录失败: %v", err))
 		return err
@@ -218,13 +246,17 @@ func (s *SpackService) InstallSpack(logChan chan<- string) error {
 		
 		// 如果目录不为空，则删除它
 		if len(entries) > 0 {
-			logChan <- "检测到已存在的 Spack 目录，正在清理..."
+			if logChan != nil {
+				logChan <- "检测到已存在的 Spack 目录，正在清理..."
+			}
 			s.addInstallLog("检测到已存在的 Spack 目录，正在清理...")
 			s.logger.Info("检测到已存在的 Spack 目录，正在清理...")
 			
 			err = os.RemoveAll(spackDir)
 			if err != nil {
-				logChan <- fmt.Sprintf("清理 Spack 目录失败: %v", err)
+				if logChan != nil {
+					logChan <- fmt.Sprintf("清理 Spack 目录失败: %v", err)
+				}
 				s.addInstallLog(fmt.Sprintf("清理 Spack 目录失败: %v", err))
 				s.logger.Error(fmt.Sprintf("清理 Spack 目录失败: %v", err))
 				return err
@@ -236,7 +268,9 @@ func (s *SpackService) InstallSpack(logChan chan<- string) error {
 	cmd := exec.Command("git", "clone", "https://github.com/spack/spack.git", spackDir)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		logChan <- fmt.Sprintf("创建 stdout pipe 失败: %v", err)
+		if logChan != nil {
+			logChan <- fmt.Sprintf("创建 stdout pipe 失败: %v", err)
+		}
 		s.addInstallLog(fmt.Sprintf("创建 stdout pipe 失败: %v", err))
 		s.logger.Error(fmt.Sprintf("创建 stdout pipe 失败: %v", err))
 		return err
@@ -244,14 +278,18 @@ func (s *SpackService) InstallSpack(logChan chan<- string) error {
 	
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		logChan <- fmt.Sprintf("创建 stderr pipe 失败: %v", err)
+		if logChan != nil {
+			logChan <- fmt.Sprintf("创建 stderr pipe 失败: %v", err)
+		}
 		s.addInstallLog(fmt.Sprintf("创建 stderr pipe 失败: %v", err))
 		s.logger.Error(fmt.Sprintf("创建 stderr pipe 失败: %v", err))
 		return err
 	}
 	
 	if err := cmd.Start(); err != nil {
-		logChan <- fmt.Sprintf("启动 git clone 命令失败: %v", err)
+		if logChan != nil {
+			logChan <- fmt.Sprintf("启动 git clone 命令失败: %v", err)
+		}
 		s.addInstallLog(fmt.Sprintf("启动 git clone 命令失败: %v", err))
 		s.logger.Error(fmt.Sprintf("启动 git clone 命令失败: %v", err))
 		return err
@@ -262,7 +300,11 @@ func (s *SpackService) InstallSpack(logChan chan<- string) error {
 		scanner := bufio.NewScanner(stdout)
 		for scanner.Scan() {
 			msg := scanner.Text()
+			if logChan != nil {
+			if logChan != nil {
 			logChan <- msg
+		}
+		}
 			s.addInstallLog(msg)
 		}
 	}()
@@ -278,14 +320,18 @@ func (s *SpackService) InstallSpack(logChan chan<- string) error {
 	}()
 	
 	if err := cmd.Wait(); err != nil {
-		logChan <- fmt.Sprintf("克隆 Spack 仓库失败: %v", err)
+		if logChan != nil {
+			logChan <- fmt.Sprintf("克隆 Spack 仓库失败: %v", err)
+		}
 		s.addInstallLog(fmt.Sprintf("克隆 Spack 仓库失败: %v", err))
 		s.logger.Error(fmt.Sprintf("克隆 Spack 仓库失败: %v", err))
 		return err
 	}
 
 	// 检出特定版本 (1.0.0)
-	logChan <- "正在检出 Spack 1.0.0 版本..."
+	if logChan != nil {
+		logChan <- "正在检出 Spack 1.0.0 版本..."
+	}
 	s.addInstallLog("正在检出 Spack 1.0.0 版本...")
 	s.logger.Info("正在检出 Spack 1.0.0 版本")
 	
@@ -293,14 +339,18 @@ func (s *SpackService) InstallSpack(logChan chan<- string) error {
 	cmd.Dir = spackDir
 	err = cmd.Run()
 	if err != nil {
-		logChan <- fmt.Sprintf("检出 Spack 1.0.0 版本失败: %v", err)
+		if logChan != nil {
+			logChan <- fmt.Sprintf("检出 Spack 1.0.0 版本失败: %v", err)
+		}
 		s.addInstallLog(fmt.Sprintf("检出 Spack 1.0.0 版本失败: %v", err))
 		s.logger.Error(fmt.Sprintf("检出 Spack 1.0.0 版本失败: %v", err))
 		return err
 	}
 
 	// 配置环境变量
-	logChan <- "正在配置环境变量..."
+	if logChan != nil {
+		logChan <- "正在配置环境变量..."
+	}
 	s.addInstallLog("正在配置环境变量...")
 	s.logger.Info("正在配置环境变量")
 	
@@ -311,7 +361,9 @@ func (s *SpackService) InstallSpack(logChan chan<- string) error {
 		// 不返回错误，因为这不是关键步骤
 	}
 
-	logChan <- "Spack 安装完成!"
+	if logChan != nil {
+		logChan <- "Spack 安装完成!"
+	}
 	s.addInstallLog("Spack 安装完成!")
 	s.logger.Info("Spack 安装完成")
 	

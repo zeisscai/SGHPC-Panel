@@ -309,6 +309,9 @@ export default {
     // WebSocket 连接
     const ws = ref(null)
     
+    // 定时检查安装状态的间隔引用
+    const installationCheckInterval = ref(null)
+    
     // 表格列定义
     const availablePackagesHeaders = [
       { text: '名称', value: 'name' },
@@ -407,46 +410,55 @@ export default {
         // 标记为正在安装
         isInstalling.value = true
         showLogDialog.value = true
-        installLog.value = '正在连接到安装服务...\n'
+        installLog.value = '正在启动安装过程...\n'
         
-        // 连接到 WebSocket 端点以获取实时日志
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-        const wsUrl = `${protocol}//${window.location.host}/api/spack/install/logs`
-        ws.value = new WebSocket(wsUrl)
-        
-        ws.value.onopen = () => {
-          installLog.value += '已连接到安装服务，开始安装...\n'
-        }
-        
-        ws.value.onmessage = (event) => {
-          if (event.data === 'INSTALL_COMPLETED') {
-            installLog.value += '\n安装完成！\n'
-            installCompleted.value = true
-            isInstalling.value = false
-            // 重新检查 Spack 状态
-            setTimeout(checkSpackStatus, 1000)
-          } else {
-            installLog.value += event.data + '\n'
-            // 自动滚动到底部
-            setTimeout(() => {
-              const textarea = document.querySelector('.v-dialog--active textarea')
-              if (textarea) {
-                textarea.scrollTop = textarea.scrollHeight
-              }
-            }, 100)
+        // 等待一段时间后开始检查安装状态
+        setTimeout(() => {
+          // 连接到 WebSocket 端点以获取实时日志
+          const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+          const wsUrl = `${protocol}//${window.location.host}/api/spack/install/logs`
+          ws.value = new WebSocket(wsUrl)
+          
+          ws.value.onopen = () => {
+            installLog.value += '已连接到安装服务，开始安装...\n'
           }
-        }
-        
-        ws.value.onerror = (error) => {
-          installLog.value += `\n连接错误: ${error.message}\n`
-          // 即使 WebSocket 连接失败，也继续检查安装状态
-          checkInstallationPeriodically()
-        }
-        
-        ws.value.onclose = () => {
-          // 连接关闭，继续检查安装状态
-          checkInstallationPeriodically()
-        }
+          
+          ws.value.onmessage = (event) => {
+            if (event.data === 'INSTALL_COMPLETED') {
+              installLog.value += '\n安装完成！\n'
+              installCompleted.value = true
+              isInstalling.value = false
+              // 重新检查 Spack 状态
+              setTimeout(checkSpackStatus, 1000)
+              
+              // 关闭 WebSocket 连接
+              if (ws.value) {
+                ws.value.close()
+                ws.value = null
+              }
+            } else {
+              installLog.value += event.data + '\n'
+              // 自动滚动到底部
+              setTimeout(() => {
+                const textarea = document.querySelector('.v-dialog--active textarea')
+                if (textarea) {
+                  textarea.scrollTop = textarea.scrollHeight
+                }
+              }, 100)
+            }
+          }
+          
+          ws.value.onerror = (error) => {
+            installLog.value += `\nWebSocket 连接错误: ${error.message}\n`
+            // 即使 WebSocket 连接失败，也继续检查安装状态
+            checkInstallationPeriodically()
+          }
+          
+          ws.value.onclose = () => {
+            // 连接关闭，继续检查安装状态
+            checkInstallationPeriodically()
+          }
+        }, 1000) // 等待1秒后再连接 WebSocket
       } catch (error) {
         installLog.value += `安装失败: ${error.message}\n`
         isInstalling.value = false
@@ -455,7 +467,13 @@ export default {
     
     // 定期检查安装状态
     const checkInstallationPeriodically = () => {
-      const interval = setInterval(async () => {
+      // 如果已有检查在运行，先清除它
+      if (installationCheckInterval.value) {
+        clearInterval(installationCheckInterval.value)
+      }
+      
+      // 启动新的定期检查
+      installationCheckInterval.value = setInterval(async () => {
         try {
           const response = await fetchSpackInstallationStatus()
           const status = response.data
@@ -465,7 +483,8 @@ export default {
           
           // 如果安装完成，停止检查
           if (!status.installing) {
-            clearInterval(interval)
+            clearInterval(installationCheckInterval.value)
+            installationCheckInterval.value = null
             isInstalling.value = false
             installLog.value += '\n安装完成！\n'
             // 重新检查 Spack 状态
@@ -544,6 +563,12 @@ export default {
             installCompleted.value = true
             // 刷新已安装软件包列表
             setTimeout(refreshPackageLists, 1000)
+            
+            // 关闭 WebSocket 连接
+            if (ws.value) {
+              ws.value.close()
+              ws.value = null
+            }
           } else {
             installLog.value += event.data + '\n'
             // 自动滚动到底部
@@ -624,6 +649,12 @@ export default {
       if (ws.value) {
         ws.value.close()
         ws.value = null
+      }
+      
+      // 清除安装状态检查间隔
+      if (installationCheckInterval.value) {
+        clearInterval(installationCheckInterval.value)
+        installationCheckInterval.value = null
       }
     }
     
