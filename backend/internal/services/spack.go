@@ -65,6 +65,23 @@ func (s *SpackService) CheckSpackStatus() SpackInfo {
 	// 检查 spack 命令是否存在
 	_, err := exec.LookPath("spack")
 	if err != nil {
+		// 如果在 PATH 中找不到，检查默认安装位置
+		homeDir, err := os.UserHomeDir()
+		if err == nil {
+			spackBinPath := filepath.Join(homeDir, "spack", "bin", "spack")
+			if _, err := os.Stat(spackBinPath); err == nil {
+				// Spack 在默认位置存在，尝试使用完整路径执行
+				cmd := exec.Command(spackBinPath, "--version")
+				output, err := cmd.Output()
+				if err == nil {
+					info.Installed = true
+					info.Version = strings.TrimSpace(string(output))
+					s.logger.Info(fmt.Sprintf("Spack 已安装（通过直接路径），版本: %s", info.Version))
+					return info
+				}
+			}
+		}
+		
 		s.logger.Info("Spack 未安装")
 		return info
 	}
@@ -150,15 +167,6 @@ func (s *SpackService) InstallSpack(logChan chan<- string) error {
 	if logChan != nil {
 		logChan <- "开始安装 Spack..."
 	}
-	
-	// 确保在函数结束时重置安装状态
-	defer func() {
-		s.installMutex.Lock()
-		s.installing = false
-		s.installMutex.Unlock()
-	}()
-	
-	logChan <- "开始安装 Spack..."
 	s.addInstallLog("开始安装 Spack...")
 	s.logger.Info("开始安装 Spack")
 
@@ -238,7 +246,9 @@ func (s *SpackService) InstallSpack(logChan chan<- string) error {
 		// 目录存在，检查是否为空
 		entries, err := os.ReadDir(spackDir)
 		if err != nil {
-			logChan <- fmt.Sprintf("检查 Spack 目录失败: %v", err)
+			if logChan != nil {
+				logChan <- fmt.Sprintf("检查 Spack 目录失败: %v", err)
+			}
 			s.addInstallLog(fmt.Sprintf("检查 Spack 目录失败: %v", err))
 			s.logger.Error(fmt.Sprintf("检查 Spack 目录失败: %v", err))
 			return err
@@ -301,10 +311,8 @@ func (s *SpackService) InstallSpack(logChan chan<- string) error {
 		for scanner.Scan() {
 			msg := scanner.Text()
 			if logChan != nil {
-			if logChan != nil {
-			logChan <- msg
-		}
-		}
+				logChan <- msg
+			}
 			s.addInstallLog(msg)
 		}
 	}()
@@ -314,7 +322,9 @@ func (s *SpackService) InstallSpack(logChan chan<- string) error {
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
 			msg := scanner.Text()
-			logChan <- msg
+			if logChan != nil {
+				logChan <- msg
+			}
 			s.addInstallLog(msg)
 		}
 	}()
@@ -361,9 +371,38 @@ func (s *SpackService) InstallSpack(logChan chan<- string) error {
 		// 不返回错误，因为这不是关键步骤
 	}
 
+	// 尝试将 Spack 添加到用户的 shell 配置文件中
+	bashrcPath := filepath.Join(homeDir, ".bashrc")
+	setupEnvPath := filepath.Join(spackDir, "share", "spack", "setup-env.sh")
+	if _, err := os.Stat(setupEnvPath); err == nil {
+		lineToAdd := fmt.Sprintf("\n# Spack 安装配置\nexport SPACK_ROOT=%s\nsource $SPACK_ROOT/share/spack/setup-env.sh\n", spackDir)
+		
+		// 检查是否已经添加过
+		if content, err := os.ReadFile(bashrcPath); err == nil {
+			if !strings.Contains(string(content), "SPACK_ROOT") {
+				// 添加到 .bashrc
+				if f, err := os.OpenFile(bashrcPath, os.O_APPEND|os.O_WRONLY, 0644); err == nil {
+					defer f.Close()
+					if _, err := f.WriteString(lineToAdd); err != nil {
+						s.logger.Error(fmt.Sprintf("添加 Spack 到 .bashrc 失败: %v", err))
+					} else {
+						s.logger.Info("成功添加 Spack 到 .bashrc")
+					}
+				}
+			}
+		}
+	}
+
+	// 添加提示信息，告知用户如何使用 Spack
 	if logChan != nil {
 		logChan <- "Spack 安装完成!"
+		logChan <- fmt.Sprintf("请执行以下命令来使用 Spack:")
+		logChan <- fmt.Sprintf("  source %s/share/spack/setup-env.sh", spackDir)
+		logChan <- fmt.Sprintf("或将其添加到您的 ~/.bashrc 文件中:")
+		logChan <- fmt.Sprintf("  echo 'source %s/share/spack/setup-env.sh' >> ~/.bashrc", spackDir)
+		logChan <- "然后重新登录或执行 source ~/.bashrc 来激活环境"
 	}
+	
 	s.addInstallLog("Spack 安装完成!")
 	s.logger.Info("Spack 安装完成")
 	

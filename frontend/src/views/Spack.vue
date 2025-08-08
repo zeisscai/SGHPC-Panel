@@ -404,11 +404,13 @@ export default {
           // 安装已在进行中
           isInstalling.value = true
           showLogDialog.value = true
+          installLog.value = '检测到安装已在进行中...\n'
+          // 开始定期检查安装状态
+          checkInstallationPeriodically()
           return
         }
         
-        // 标记为正在安装
-        isInstalling.value = true
+        // 显示初始日志
         showLogDialog.value = true
         installLog.value = '正在启动安装过程...\n'
         
@@ -459,6 +461,9 @@ export default {
             checkInstallationPeriodically()
           }
         }, 1000) // 等待1秒后再连接 WebSocket
+        
+        // 标记为正在安装
+        isInstalling.value = true
       } catch (error) {
         installLog.value += `安装失败: ${error.message}\n`
         isInstalling.value = false
@@ -479,7 +484,9 @@ export default {
           const status = response.data
           
           // 更新日志
-          installLog.value = status.log.join('\n')
+          if (status.log && status.log.length > 0) {
+            installLog.value = status.log.join('\n')
+          }
           
           // 如果安装完成，停止检查
           if (!status.installing) {
@@ -489,6 +496,14 @@ export default {
             installLog.value += '\n安装完成！\n'
             // 重新检查 Spack 状态
             setTimeout(checkSpackStatus, 1000)
+          } else {
+            // 如果仍在安装中，自动滚动到底部
+            setTimeout(() => {
+              const textarea = document.querySelector('.v-dialog--active textarea')
+              if (textarea) {
+                textarea.scrollTop = textarea.scrollHeight
+              }
+            }, 100)
           }
         } catch (error) {
           console.error('检查安装状态失败:', error)
@@ -661,7 +676,12 @@ export default {
     // 组件挂载时检查 Spack 状态
     onMounted(() => {
       checkSpackStatus()
-      checkSpackInstallationStatus()
+      // 定期检查 Spack 安装状态，确保能及时更新界面
+      setInterval(() => {
+        if (!isInstalling.value) {
+          checkSpackStatus()
+        }
+      }, 10000) // 每10秒检查一次
     })
     
     return {
