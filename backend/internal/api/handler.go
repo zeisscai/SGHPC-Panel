@@ -1,6 +1,7 @@
 package api
 
 import (
+	"panel-tool/internal/models"
 	"panel-tool/internal/services"
 	"encoding/json"
 	"fmt"
@@ -32,10 +33,48 @@ func HandleGetComputeNodes(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(nodes)
 }
 
-// HandleGetSlurmJobs 处理获取SLURM作业状态请求
+// HandleGetSlurmJobs 获取Slurm作业信息
 func HandleGetSlurmJobs(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	jobs := services.GetSlurmJobs()
+	
+	// 检查Slurm是否已安装
+	_, err := exec.LookPath("sinfo")
+	if err != nil {
+		// Slurm未安装，返回空数组
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode([]interface{}{})
+		return
+	}
+	
+	// 执行squeue命令获取作业信息
+	cmd := exec.Command("squeue", "--all", "--states=all", "--format=%i|%j|%u|%t|%M|%l|%N", "--noheader")
+	output, err := cmd.Output()
+	if err != nil {
+		http.Error(w, "Failed to execute squeue command", http.StatusInternalServerError)
+		return
+	}
+	
+	// 解析输出
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	var jobs []models.JobModel
+	
+	for _, line := range lines {
+		parts := strings.Split(line, "|")
+		if len(parts) != 7 {
+			continue
+		}
+		
+		//jobID, _ := strconv.Atoi(parts[0])
+		job := models.JobModel{
+			JobID:       parts[0],
+			User:        parts[2],
+			Status:      parts[3],
+			ComputeTime: parts[4],
+			WaitTime:    parts[5],
+		}
+		jobs = append(jobs, job)
+	}
+	
 	json.NewEncoder(w).Encode(jobs)
 }
 

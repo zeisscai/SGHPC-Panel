@@ -36,24 +36,6 @@
         >Overview</v-tooltip>
       </v-list-item>
       
-      <v-list-item
-        link
-        to="/slurm"
-        :active="$route.path === '/slurm'"
-        class="sidebar-item"
-        :ripple="false"
-      >
-        <template v-slot:prepend>
-          <v-icon class="sidebar-icon">mdi-server-network</v-icon>
-        </template>
-        <v-list-item-title v-if="!isRail">Slurm Deployment</v-list-item-title>
-        <v-tooltip
-          v-if="isRail"
-          activator="parent"
-          location="right"
-        >Slurm Deployment</v-tooltip>
-      </v-list-item>
-      
       <v-list-group value="system" class="list-group">
         <template v-slot:activator="{ props }">
           <v-list-item
@@ -152,6 +134,11 @@ export default {
       return router.currentRoute.value.path.startsWith('/system')
     })
     
+    const isRail = computed(() => {
+      // 这里可以根据需要实现侧边栏收缩逻辑
+      return false
+    })
+    
     const logout = () => {
       // 清除认证信息
       localStorage.removeItem('authToken')
@@ -163,9 +150,15 @@ export default {
       router.push('/login')
     }
     
+    const toggleRail = () => {
+      // 实现侧边栏收缩逻辑
+    }
+    
     return {
       isSystemRoute,
-      logout
+      isRail,
+      logout,
+      toggleRail
     }
   }
 }
@@ -173,51 +166,37 @@ export default {
 
 <style scoped>
 .sidebar-container {
-  border-right: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
+  z-index: 999;
 }
 
-.sidebar-item,
+.sidebar-item {
+  margin-bottom: 4px;
+  border-radius: 4px;
+  margin-left: 8px;
+  margin-right: 8px;
+}
+
+.sidebar-item:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.sidebar-icon {
+  margin-right: 12px;
+}
+
 .submenu-item {
-  margin: 4px 8px;
-  border-radius: 8px !important;
-  transition: all 0.3s ease;
+  margin-bottom: 4px;
+  border-radius: 4px;
+  margin-left: 16px;
+  margin-right: 8px;
+  padding-left: 56px !important;
 }
 
-.sidebar-item:hover,
-.submenu-item:hover {
-  background-color: rgba(255, 255, 255, 0.1) !important;
-}
-
-.sidebar-item.v-list-item--active,
-.submenu-item.v-list-item--active {
-  background-color: rgba(25, 118, 210, 0.2) !important;
-  color: #1976D2;
-}
-
-.sidebar-icon,
 .submenu-icon {
-  margin-right: 16px !important;
-  background-color: transparent !important;
+  margin-right: 12px;
 }
 
-.v-theme--dark .sidebar-item.v-list-item--active,
-.v-theme--dark .submenu-item.v-list-item--active {
-  background-color: rgba(25, 118, 210, 0.3) !important;
-  color: #64B5F6 !important;
-}
-
-.v-theme--dark .sidebar-item.v-list-item--active .sidebar-icon,
-.v-theme--dark .submenu-item.v-list-item--active .submenu-icon {
-  color: #64B5F6 !important;
-}
-
-/* 修复折叠箭头的黑色背景问题 */
-.list-group :deep(.v-list-group__header .v-icon) {
-  background-color: transparent !important;
-}
-
-/* 确保所有图标都没有黑色背景 */
-:deep(.v-icon) {
-  background-color: transparent !important;
+.list-group :deep(.v-list-group__items .v-list-item) {
+  padding-inline-start: 16px !important;
 }
 </style>
