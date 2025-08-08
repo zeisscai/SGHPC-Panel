@@ -4,6 +4,7 @@ import System from '../views/System.vue'
 import Terminal from '../views/Terminal.vue'
 import FileManagement from '../views/FileManagement.vue'
 import Login from '../views/Login.vue'
+import Spack from '../views/Spack.vue'
 
 const routes = [
   {
@@ -33,6 +34,11 @@ const routes = [
         path: 'files',
         name: 'FileManagement',
         component: FileManagement
+      },
+      {
+        path: 'spack',
+        name: 'Spack',
+        component: Spack
       }
     ]
   }

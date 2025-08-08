@@ -86,6 +86,24 @@
             location="right"
           >File Management</v-tooltip>
         </v-list-item>
+        
+        <v-list-item
+          link
+          to="/system/spack"
+          :active="$route.path === '/system/spack'"
+          class="submenu-item"
+          :ripple="false"
+        >
+          <template v-slot:prepend>
+            <v-icon size="small" class="submenu-icon">mdi-package-variant</v-icon>
+          </template>
+          <v-list-item-title v-if="!isRail">Spack</v-list-item-title>
+          <v-tooltip
+            v-if="isRail"
+            activator="parent"
+            location="right"
+          >Spack</v-tooltip>
+        </v-list-item>
       </v-list-group>
     </v-list>
     

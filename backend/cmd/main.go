@@ -22,6 +22,17 @@ func main() {
 	http.HandleFunc("/api/file/delete", api.HandleFileDelete)
 	http.HandleFunc("/api/file/permissions", api.HandleFilePermissions)
 	
+	// Spack 相关路由
+	http.HandleFunc("/api/spack/status", api.HandleGetSpackStatus)
+	http.HandleFunc("/api/spack/install", api.HandleInstallSpack)
+	http.HandleFunc("/api/spack/packages/available", api.HandleGetAvailablePackages)
+	http.HandleFunc("/api/spack/packages/installed", api.HandleGetInstalledPackages)
+	http.HandleFunc("/api/spack/package/install", api.HandleInstallPackage)
+	http.HandleFunc("/api/spack/package/uninstall", api.HandleUninstallPackage)
+	http.HandleFunc("/api/spack/repositories", api.HandleGetRepositories)
+	http.HandleFunc("/api/spack/repositories/update", api.HandleSetRepositories)
+	http.HandleFunc("/api/spack/install/logs", api.HandleSpackInstallLogs)
+	http.HandleFunc("/api/spack/package/install/logs", api.HandlePackageInstallLogs)
 	
 	// WebSocket终端路由
 	http.HandleFunc("/api/ws", api.HandleWebSocket)
