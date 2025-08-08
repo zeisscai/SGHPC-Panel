@@ -48,7 +48,7 @@
                 <v-col cols="12" md="6">
                   <div class="d-flex align-center">
                     <v-icon color="success" class="mr-2">mdi-check-circle</v-icon>
-                    <span><strong>Spack 已安装</strong> 版本: {{ spackVersion }}</span>
+                    <span><strong>Spack 已安装</strong> (版本: {{ spackVersion }})</span>
                   </div>
                 </v-col>
                 <v-col cols="12" md="6">
@@ -88,14 +88,14 @@
                 </v-col>
               </v-row>
               
-              <v-tabs v-model="activeTab" fixed-tabs class="mb-4">
-                <v-tab key="available">可安装</v-tab>
-                <v-tab key="installed">已安装</v-tab>
+              <v-tabs v-model="activeTab" fixed-tabs class="mb-4" bg-color="primary" dark>
+                <v-tab value="available">可安装</v-tab>
+                <v-tab value="installed">已安装</v-tab>
               </v-tabs>
               
-              <v-tabs-items v-model="activeTab">
+              <v-window v-model="activeTab">
                 <!-- 可安装软件包选项卡 -->
-                <v-tab-item key="available">
+                <v-window-item value="available">
                   <v-card flat>
                     <v-card-text>
                       <v-data-table
@@ -127,10 +127,10 @@
                       </v-data-table>
                     </v-card-text>
                   </v-card>
-                </v-tab-item>
+                </v-window-item>
                 
                 <!-- 已安装软件包选项卡 -->
-                <v-tab-item key="installed">
+                <v-window-item value="installed">
                   <v-card flat>
                     <v-card-text>
                       <v-data-table
@@ -154,8 +154,8 @@
                       </v-data-table>
                     </v-card-text>
                   </v-card>
-                </v-tab-item>
-              </v-tabs-items>
+                </v-window-item>
+              </v-window>
             </div>
           </v-card-text>
         </v-card>
@@ -281,7 +281,7 @@ export default {
     const searchQuery = ref('')
     
     // 活动选项卡
-    const activeTab = ref(0)
+    const activeTab = ref('available')
     
     // 加载状态
     const isInstalling = ref(false)
@@ -515,7 +515,7 @@ export default {
       isRefreshing.value = true
       try {
         // 根据当前选项卡刷新对应的列表
-        if (activeTab.value === 0) {
+        if (activeTab.value === 'available') {
           // 刷新可安装软件包列表
           loadingAvailablePackages.value = true
           try {
@@ -591,7 +591,7 @@ export default {
             // 刷新已安装软件包列表
             setTimeout(() => {
               // 切换到已安装选项卡
-              activeTab.value = 1
+              activeTab.value = 'installed'
               refreshPackageLists()
             }, 1000)
             
