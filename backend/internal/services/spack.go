@@ -21,6 +21,12 @@ type SpackService struct {
 	installMutex   sync.Mutex
 	installLog     []string
 	installLogMutex sync.Mutex
+	
+	// 添加安装状态缓存
+	cachedStatus   *SpackInfo
+	cacheTime      time.Time
+	cacheMutex     sync.RWMutex
+	cacheDuration  time.Duration
 }
 
 // NewSpackService 创建新的 Spack 服务实例
@@ -29,6 +35,7 @@ func NewSpackService() *SpackService {
 		logger: utils.NewLogger(),
 		installing: false,
 		installLog: make([]string, 0),
+		cacheDuration: 30 * time.Second, // 缓存30秒
 	}
 }
 
@@ -53,8 +60,17 @@ type InstallationStatus struct {
 	Log        []string `json:"log"`
 }
 
-// CheckSpackStatus 检查 Spack 安装状态
+// CheckSpackStatus 检查 Spack 安装状态（带缓存）
 func (s *SpackService) CheckSpackStatus() SpackInfo {
+	// 检查缓存
+	s.cacheMutex.RLock()
+	if s.cachedStatus != nil && time.Since(s.cacheTime) < s.cacheDuration {
+		cached := *s.cachedStatus
+		s.cacheMutex.RUnlock()
+		return cached
+	}
+	s.cacheMutex.RUnlock()
+
 	s.logger.Info("检查 Spack 安装状态")
 
 	info := SpackInfo{
@@ -77,12 +93,22 @@ func (s *SpackService) CheckSpackStatus() SpackInfo {
 					info.Installed = true
 					info.Version = strings.TrimSpace(string(output))
 					s.logger.Info(fmt.Sprintf("Spack 已安装（通过直接路径），版本: %s", info.Version))
+					// 更新缓存
+					s.cacheMutex.Lock()
+					s.cachedStatus = &info
+					s.cacheTime = time.Now()
+					s.cacheMutex.Unlock()
 					return info
 				}
 			}
 		}
 		
 		s.logger.Info("Spack 未安装")
+		// 更新缓存
+		s.cacheMutex.Lock()
+		s.cachedStatus = &info
+		s.cacheTime = time.Now()
+		s.cacheMutex.Unlock()
 		return info
 	}
 
@@ -91,6 +117,11 @@ func (s *SpackService) CheckSpackStatus() SpackInfo {
 	output, err := cmd.Output()
 	if err != nil {
 		s.logger.Error(fmt.Sprintf("获取 Spack 版本失败: %v", err))
+		// 更新缓存
+		s.cacheMutex.Lock()
+		s.cachedStatus = &info
+		s.cacheTime = time.Now()
+		s.cacheMutex.Unlock()
 		return info
 	}
 
@@ -98,7 +129,21 @@ func (s *SpackService) CheckSpackStatus() SpackInfo {
 	info.Version = strings.TrimSpace(string(output))
 	s.logger.Info(fmt.Sprintf("Spack 已安装，版本: %s", info.Version))
 
+	// 更新缓存
+	s.cacheMutex.Lock()
+	s.cachedStatus = &info
+	s.cacheTime = time.Now()
+	s.cacheMutex.Unlock()
+
 	return info
+}
+
+// InvalidateStatusCache 使状态缓存失效
+func (s *SpackService) InvalidateStatusCache() {
+	s.cacheMutex.Lock()
+	s.cachedStatus = nil
+	s.cacheTime = time.Time{}
+	s.cacheMutex.Unlock()
 }
 
 // GetInstallationStatus 获取安装状态
@@ -162,6 +207,9 @@ func (s *SpackService) InstallSpack(logChan chan<- string) error {
 		if logChan != nil {
 			close(logChan)
 		}
+		
+		// 使缓存失效，因为安装状态已改变
+		s.InvalidateStatusCache()
 	}()
 	
 	if logChan != nil {
@@ -431,6 +479,7 @@ func (s *SpackService) InstallSpack(logChan chan<- string) error {
 func (s *SpackService) GetAvailablePackages() ([]Package, error) {
 	s.logger.Info("获取可安装的软件包列表")
 
+	// 使用缓存检查 Spack 安装状态
 	if !s.CheckSpackStatus().Installed {
 		return nil, fmt.Errorf("Spack 未安装")
 	}
@@ -477,6 +526,7 @@ func (s *SpackService) GetAvailablePackages() ([]Package, error) {
 func (s *SpackService) GetInstalledPackages() ([]Package, error) {
 	s.logger.Info("获取已安装的软件包列表")
 
+	// 使用缓存检查 Spack 安装状态
 	if !s.CheckSpackStatus().Installed {
 		return nil, fmt.Errorf("Spack 未安装")
 	}
@@ -541,6 +591,7 @@ func (s *SpackService) InstallPackage(packageName string, options string, logCha
 	s.addInstallLog(fmt.Sprintf("开始安装软件包: %s，选项: %s", packageName, options))
 	s.logger.Info(fmt.Sprintf("开始安装软件包: %s，选项: %s", packageName, options))
 
+	// 使用缓存检查 Spack 安装状态
 	if !s.CheckSpackStatus().Installed {
 		logChan <- "错误: Spack 未安装"
 		s.addInstallLog("错误: Spack 未安装")
@@ -586,7 +637,9 @@ func (s *SpackService) InstallPackage(packageName string, options string, logCha
 		scanner := bufio.NewScanner(stdout)
 		for scanner.Scan() {
 			msg := scanner.Text()
-			logChan <- msg
+			if logChan != nil {
+				logChan <- msg
+			}
 			s.addInstallLog(msg)
 		}
 	}()
@@ -596,7 +649,9 @@ func (s *SpackService) InstallPackage(packageName string, options string, logCha
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
 			msg := scanner.Text()
-			logChan <- msg
+			if logChan != nil {
+				logChan <- msg
+			}
 			s.addInstallLog(msg)
 		}
 	}()
