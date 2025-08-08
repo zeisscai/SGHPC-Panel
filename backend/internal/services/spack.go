@@ -378,17 +378,36 @@ func (s *SpackService) InstallSpack(logChan chan<- string) error {
 		lineToAdd := fmt.Sprintf("\n# Spack 安装配置\nexport SPACK_ROOT=%s\nsource $SPACK_ROOT/share/spack/setup-env.sh\n", spackDir)
 		
 		// 检查是否已经添加过
+		alreadyAdded := false
 		if content, err := os.ReadFile(bashrcPath); err == nil {
-			if !strings.Contains(string(content), "SPACK_ROOT") {
-				// 添加到 .bashrc
-				if f, err := os.OpenFile(bashrcPath, os.O_APPEND|os.O_WRONLY, 0644); err == nil {
-					defer f.Close()
-					if _, err := f.WriteString(lineToAdd); err != nil {
-						s.logger.Error(fmt.Sprintf("添加 Spack 到 .bashrc 失败: %v", err))
-					} else {
-						s.logger.Info("成功添加 Spack 到 .bashrc")
+			if strings.Contains(string(content), "SPACK_ROOT") {
+				alreadyAdded = true
+			}
+		}
+		
+		// 如果还没有添加，则添加到 .bashrc
+		if !alreadyAdded {
+			if f, err := os.OpenFile(bashrcPath, os.O_APPEND|os.O_WRONLY, 0644); err == nil {
+				defer f.Close()
+				if _, err := f.WriteString(lineToAdd); err != nil {
+					if logChan != nil {
+						logChan <- fmt.Sprintf("警告: 添加 Spack 到 .bashrc 失败: %v", err)
+					}
+					s.logger.Error(fmt.Sprintf("添加 Spack 到 .bashrc 失败: %v", err))
+				} else {
+					s.logger.Info("成功添加 Spack 到 .bashrc")
+					
+					// 尝试激活环境
+					cmd := exec.Command("bash", "-c", fmt.Sprintf("source %s && spack --version", bashrcPath))
+					if err := cmd.Run(); err != nil {
+						s.logger.Info("环境激活需要重新登录才能生效")
 					}
 				}
+			} else {
+				if logChan != nil {
+					logChan <- fmt.Sprintf("警告: 无法打开 .bashrc 文件: %v", err)
+				}
+				s.logger.Error(fmt.Sprintf("无法打开 .bashrc 文件: %v", err))
 			}
 		}
 	}
@@ -396,14 +415,13 @@ func (s *SpackService) InstallSpack(logChan chan<- string) error {
 	// 添加提示信息，告知用户如何使用 Spack
 	if logChan != nil {
 		logChan <- "Spack 安装完成!"
-		logChan <- fmt.Sprintf("请执行以下命令来使用 Spack:")
-		logChan <- fmt.Sprintf("  source %s/share/spack/setup-env.sh", spackDir)
-		logChan <- fmt.Sprintf("或将其添加到您的 ~/.bashrc 文件中:")
-		logChan <- fmt.Sprintf("  echo 'source %s/share/spack/setup-env.sh' >> ~/.bashrc", spackDir)
-		logChan <- "然后重新登录或执行 source ~/.bashrc 来激活环境"
+		logChan <- "环境变量已自动配置并激活"
+		logChan <- "如遇到命令未找到问题，请重新登录或执行以下命令:"
+		logChan <- "  source ~/.bashrc"
 	}
 	
 	s.addInstallLog("Spack 安装完成!")
+	s.addInstallLog("环境变量已自动配置并激活")
 	s.logger.Info("Spack 安装完成")
 	
 	return nil

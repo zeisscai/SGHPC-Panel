@@ -48,7 +48,7 @@
                 <v-col cols="12" md="6">
                   <div class="d-flex align-center">
                     <v-icon color="success" class="mr-2">mdi-check-circle</v-icon>
-                    <span><strong>Spack 已安装</strong> (版本: {{ spackVersion }})</span>
+                    <span><strong>Spack 已安装</strong> 版本: {{ spackVersion }}</span>
                   </div>
                 </v-col>
                 <v-col cols="12" md="6">
