@@ -422,7 +422,8 @@ func (s *SpackService) GetAvailablePackages() ([]Package, error) {
 	output, err := cmd.Output()
 	if err != nil {
 		s.logger.Error(fmt.Sprintf("执行 spack list 命令失败: %v", err))
-		return nil, fmt.Errorf("执行 spack list 命令失败: %v", err)
+		// 即使命令执行失败，也返回空列表而不是错误，确保前端能够处理
+		return []Package{}, nil
 	}
 
 	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
@@ -467,7 +468,8 @@ func (s *SpackService) GetInstalledPackages() ([]Package, error) {
 	output, err := cmd.Output()
 	if err != nil {
 		s.logger.Error(fmt.Sprintf("执行 spack find 命令失败: %v", err))
-		return nil, fmt.Errorf("执行 spack find 命令失败: %v", err)
+		// 即使命令执行失败，也返回空列表而不是错误，确保前端能够处理
+		return []Package{}, nil
 	}
 
 	lines := strings.Split(strings.TrimSpace(string(output)), "\n")

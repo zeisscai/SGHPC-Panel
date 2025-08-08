@@ -43,21 +43,38 @@
               </div>
             </v-alert>
             
-            <v-alert
-              v-else-if="spackStatus === 'installed'"
-              type="success"
-              outlined
-            >
-              <strong>Spack 已安装</strong>
-              <div class="mt-2">
-                <p>版本: {{ spackVersion }}</p>
-              </div>
-            </v-alert>
-            
-            <!-- Spack 功能区域 -->
-            <div v-if="spackStatus === 'installed'">
-              <v-row class="mb-4">
+            <div v-else-if="spackStatus === 'installed'">
+              <v-row class="mb-4 align-center">
                 <v-col cols="12" md="6">
+                  <div class="d-flex align-center">
+                    <v-icon color="success" class="mr-2">mdi-check-circle</v-icon>
+                    <span><strong>Spack 已安装</strong> (版本: {{ spackVersion }})</span>
+                  </div>
+                </v-col>
+                <v-col cols="12" md="6">
+                  <div class="d-flex justify-md-end">
+                    <v-btn
+                      color="primary"
+                      @click="refreshPackageLists"
+                      :loading="isRefreshing"
+                      class="mr-2"
+                    >
+                      <v-icon left>mdi-refresh</v-icon>
+                      刷新列表
+                    </v-btn>
+                    <v-btn
+                      color="secondary"
+                      @click="modifyRepositories"
+                    >
+                      <v-icon left>mdi-source-repository</v-icon>
+                      修改软件源
+                    </v-btn>
+                  </div>
+                </v-col>
+              </v-row>
+              
+              <v-row class="mb-4">
+                <v-col cols="12">
                   <v-text-field
                     v-model="searchQuery"
                     label="搜索软件包"
@@ -69,27 +86,9 @@
                     @keyup.enter="searchPackages"
                   ></v-text-field>
                 </v-col>
-                <v-col cols="12" md="6">
-                  <v-btn
-                    color="primary"
-                    @click="refreshPackageLists"
-                    :loading="isRefreshing"
-                    class="mr-2"
-                  >
-                    <v-icon left>mdi-refresh</v-icon>
-                    刷新列表
-                  </v-btn>
-                  <v-btn
-                    color="secondary"
-                    @click="modifyRepositories"
-                  >
-                    <v-icon left>mdi-source-repository</v-icon>
-                    修改软件源
-                  </v-btn>
-                </v-col>
               </v-row>
               
-              <v-tabs v-model="activeTab" fixed-tabs>
+              <v-tabs v-model="activeTab" fixed-tabs class="mb-4">
                 <v-tab key="available">可安装</v-tab>
                 <v-tab key="installed">已安装</v-tab>
               </v-tabs>
@@ -515,21 +514,34 @@ export default {
     const refreshPackageLists = async () => {
       isRefreshing.value = true
       try {
-        // 获取可安装的软件包
-        loadingAvailablePackages.value = true
-        const availableResponse = await fetchAvailablePackages()
-        availablePackages.value = availableResponse.data
-        loadingAvailablePackages.value = false
-        
-        // 获取已安装的软件包
-        loadingInstalledPackages.value = true
-        const installedResponse = await fetchInstalledPackages()
-        installedPackages.value = installedResponse.data
-        loadingInstalledPackages.value = false
+        // 根据当前选项卡刷新对应的列表
+        if (activeTab.value === 0) {
+          // 刷新可安装软件包列表
+          loadingAvailablePackages.value = true
+          try {
+            const availableResponse = await fetchAvailablePackages()
+            availablePackages.value = availableResponse.data || []
+          } catch (error) {
+            console.error('获取可安装软件包列表失败:', error)
+            availablePackages.value = []
+          } finally {
+            loadingAvailablePackages.value = false
+          }
+        } else {
+          // 刷新已安装软件包列表
+          loadingInstalledPackages.value = true
+          try {
+            const installedResponse = await fetchInstalledPackages()
+            installedPackages.value = installedResponse.data || []
+          } catch (error) {
+            console.error('获取已安装软件包列表失败:', error)
+            installedPackages.value = []
+          } finally {
+            loadingInstalledPackages.value = false
+          }
+        }
       } catch (error) {
         console.error('刷新软件包列表失败:', error)
-        loadingAvailablePackages.value = false
-        loadingInstalledPackages.value = false
       } finally {
         isRefreshing.value = false
       }
@@ -577,7 +589,11 @@ export default {
             installLog.value += `\n${packageName} 安装完成！\n`
             installCompleted.value = true
             // 刷新已安装软件包列表
-            setTimeout(refreshPackageLists, 1000)
+            setTimeout(() => {
+              // 切换到已安装选项卡
+              activeTab.value = 1
+              refreshPackageLists()
+            }, 1000)
             
             // 关闭 WebSocket 连接
             if (ws.value) {
@@ -673,15 +689,26 @@ export default {
       }
     }
     
-    // 组件挂载时检查 Spack 状态
-    onMounted(() => {
-      checkSpackStatus()
+    // 组件挂载时检查 Spack 状态并加载初始数据
+    onMounted(async () => {
+      await checkSpackStatus()
+      
+      // 如果已安装，加载初始数据
+      if (spackStatus.value === 'installed') {
+        await refreshPackageLists()
+      }
+      
       // 定期检查 Spack 安装状态，确保能及时更新界面
       setInterval(() => {
         if (!isInstalling.value) {
           checkSpackStatus()
         }
       }, 10000) // 每10秒检查一次
+    })
+    
+    // 监听选项卡变化，刷新对应的数据
+    watch(activeTab, () => {
+      refreshPackageLists()
     })
     
     return {
