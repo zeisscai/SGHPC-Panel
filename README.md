@@ -1,4 +1,4 @@
-# SGHPC-Panel
+# SGHPC-Panel（开发中）
 
 SGHPC-Panel 是一个用于管理和监控高性能计算（HPC）集群的 Web 面板工具。该面板提供了对计算节点、作业调度（如 Slurm）、文件管理和终端操作的集中可视化控制。
 
