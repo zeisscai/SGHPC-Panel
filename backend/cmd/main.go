@@ -24,6 +24,7 @@ func main() {
 	
 	// Spack 相关路由
 	http.HandleFunc("/api/spack/status", api.HandleGetSpackStatus)
+	http.HandleFunc("/api/spack/installation-status", api.HandleGetSpackInstallationStatus)
 	http.HandleFunc("/api/spack/install", api.HandleInstallSpack)
 	http.HandleFunc("/api/spack/packages/available", api.HandleGetAvailablePackages)
 	http.HandleFunc("/api/spack/packages/installed", api.HandleGetInstalledPackages)

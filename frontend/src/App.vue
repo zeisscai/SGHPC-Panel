@@ -45,22 +45,35 @@ export default {
       localStorage.removeItem('user')
       localStorage.removeItem('lastActivity')
       localStorage.removeItem('shouldChangePassword')
-      
+
       // 跳转到登录页面
       this.router.push('/login')
+    },
+    updateLastActivity() {
+      // 更新最后活动时间
+      localStorage.setItem('lastActivity', Date.now().toString())
     }
   },
   mounted() {
     // 如果用户已认证，启动自动登出检查
     if (localStorage.getItem('authToken')) {
+      // 更新最后活动时间
+      this.updateLastActivity()
+
+      // 监听用户活动事件
+      const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart', 'click']
+      events.forEach(event => {
+        document.addEventListener(event, this.updateLastActivity, true)
+      })
+
       // 每分钟检查一次是否超时
       this.autoLogoutInterval = setInterval(() => {
         const lastActivity = localStorage.getItem('lastActivity')
         if (lastActivity) {
           const now = Date.now()
           const elapsed = now - parseInt(lastActivity)
-          // 5分钟超时 (5 * 60 * 1000 = 300000ms)
-          if (elapsed > 300000) {
+          // 30分钟超时 (30 * 60 * 1000 = 1800000ms)
+          if (elapsed > 1800000) {
             this.logout()
             alert('Session expired due to inactivity. Please log in again.')
           }
@@ -69,9 +82,15 @@ export default {
     }
   },
   beforeUnmount() {
-    // 清理定时器
+    // 清理定时器和事件监听器
     if (this.autoLogoutInterval) {
       clearInterval(this.autoLogoutInterval)
+    }
+
+    // 移除事件监听器
+    const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart', 'click']
+    events.forEach(event => {
+      document.removeEventListener(event, this.updateLastActivity, true)
     }
   }
 }

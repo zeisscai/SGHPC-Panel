@@ -55,6 +55,14 @@ func HandleGetSpackStatus(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
+// HandleGetSpackInstallationStatus 获取 Spack 安装状态
+func HandleGetSpackInstallationStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	
+	status := spackService.GetInstallationStatus()
+	json.NewEncoder(w).Encode(status)
+}
+
 // HandleInstallSpack 安装 Spack
 func HandleInstallSpack(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -63,6 +71,17 @@ func HandleInstallSpack(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	
+	// 检查是否已经在安装
+	status := spackService.GetInstallationStatus()
+	if status.Installing {
+		response := map[string]interface{}{
+			"message": "Spack installation is already in progress",
+			"status":  "in_progress",
+		}
+		json.NewEncoder(w).Encode(response)
+		return
+	}
 	
 	// 创建一个 channel 用于传输日志
 	logChan := make(chan string)

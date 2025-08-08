@@ -10,7 +10,7 @@
           <v-card-text>
             <!-- Spack 安装状态检查 -->
             <v-alert
-              v-if="spackStatus === 'not_installed'"
+              v-if="spackStatus === 'not_installed' && !isInstalling"
               type="warning"
               outlined
             >
@@ -19,10 +19,26 @@
                 <v-btn
                   color="primary"
                   @click="installSpack"
-                  :loading="isInstalling"
                 >
                   <v-icon left>mdi-download</v-icon>
                   安装 Spack 1.0.0
+                </v-btn>
+              </div>
+            </v-alert>
+            
+            <v-alert
+              v-else-if="spackStatus === 'not_installed' && isInstalling"
+              type="info"
+              outlined
+            >
+              <strong>Spack 正在安装中...</strong>
+              <div class="mt-2">
+                <v-btn
+                  color="primary"
+                  @click="showLogDialog = true"
+                >
+                  <v-icon left>mdi-file-document</v-icon>
+                  查看安装日志
                 </v-btn>
               </div>
             </v-alert>
@@ -167,7 +183,6 @@
           <v-btn
             color="primary"
             @click="closeLogDialog"
-            :disabled="!installCompleted"
           >
             关闭
           </v-btn>
@@ -243,9 +258,18 @@
 </template>
 
 <script>
-import { ref, onMounted, computed } from 'vue'
-
-export default {
+import { ref, onMounted, computed, watch } from 'vue'
+import {
+  fetchSpackStatus,
+  installSpack,
+  fetchAvailablePackages,
+  fetchInstalledPackages,
+  installPackage,
+  uninstallPackage,
+  fetchRepositories,
+  updateRepositories,
+  fetchSpackInstallationStatus
+} from '../api/spack'
   name: 'Spack',
   setup() {
     // Spack 状态 (not_installed, installed)
@@ -322,24 +346,67 @@ export default {
     // 检查 Spack 安装状态
     const checkSpackStatus = async () => {
       try {
-        const response = await fetch('/api/spack/status')
-        const data = await response.json()
-        spackStatus.value = data.installed ? 'installed' : 'not_installed'
-        spackVersion.value = data.version
+        const response = await fetchSpackStatus()
+        spackStatus.value = response.data.installed ? 'installed' : 'not_installed'
+        spackVersion.value = response.data.version
       } catch (error) {
         console.error('检查 Spack 状态失败:', error)
         spackStatus.value = 'not_installed'
       }
     }
     
-    // 安装 Spack
-    const installSpack = async () => {
-      isInstalling.value = true
-      showLogDialog.value = true
-      installLog.value = '正在连接到安装服务...\n'
-      installCompleted.value = false
-      
+    // 检查 Spack 安装进度
+    const checkSpackInstallationStatus = async () => {
       try {
+        const response = await fetchSpackInstallationStatus()
+        const status = response.data
+        
+        // 如果正在安装，则更新状态
+        if (status.installing) {
+          isInstalling.value = true
+          
+          // 显示日志
+          installLog.value = status.log.join('\n')
+          
+          // 如果日志对话框打开，自动滚动到底部
+          if (showLogDialog.value) {
+            setTimeout(() => {
+              const textarea = document.querySelector('.v-dialog--active textarea')
+              if (textarea) {
+                textarea.scrollTop = textarea.scrollHeight
+              }
+            }, 100)
+          }
+        } else {
+          // 如果安装完成，更新 Spack 状态
+          if (isInstalling.value) {
+            isInstalling.value = false
+            await checkSpackStatus()
+          }
+        }
+      } catch (error) {
+        console.error('检查 Spack 安装状态失败:', error)
+      }
+    }
+    
+    // 安装 Spack
+    const installSpackHandler = async () => {
+      try {
+        // 启动安装过程
+        const response = await installSpack()
+        
+        if (response.data.status === "in_progress") {
+          // 安装已在进行中
+          isInstalling.value = true
+          showLogDialog.value = true
+          return
+        }
+        
+        // 标记为正在安装
+        isInstalling.value = true
+        showLogDialog.value = true
+        installLog.value = '正在连接到安装服务...\n'
+        
         // 连接到 WebSocket 端点以获取实时日志
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
         const wsUrl = `${protocol}//${window.location.host}/api/spack/install/logs`
@@ -370,18 +437,42 @@ export default {
         
         ws.value.onerror = (error) => {
           installLog.value += `\n连接错误: ${error.message}\n`
-          installCompleted.value = true
-          isInstalling.value = false
+          // 即使 WebSocket 连接失败，也继续检查安装状态
+          checkInstallationPeriodically()
         }
         
         ws.value.onclose = () => {
-          // 连接关闭是正常的
+          // 连接关闭，继续检查安装状态
+          checkInstallationPeriodically()
         }
       } catch (error) {
         installLog.value += `安装失败: ${error.message}\n`
-        installCompleted.value = true
         isInstalling.value = false
       }
+    }
+    
+    // 定期检查安装状态
+    const checkInstallationPeriodically = () => {
+      const interval = setInterval(async () => {
+        try {
+          const response = await fetchSpackInstallationStatus()
+          const status = response.data
+          
+          // 更新日志
+          installLog.value = status.log.join('\n')
+          
+          // 如果安装完成，停止检查
+          if (!status.installing) {
+            clearInterval(interval)
+            isInstalling.value = false
+            installLog.value += '\n安装完成！\n'
+            // 重新检查 Spack 状态
+            setTimeout(checkSpackStatus, 1000)
+          }
+        } catch (error) {
+          console.error('检查安装状态失败:', error)
+        }
+      }, 2000) // 每2秒检查一次
     }
     
     // 刷新软件包列表
@@ -573,6 +664,7 @@ export default {
     // 组件挂载时检查 Spack 状态
     onMounted(() => {
       checkSpackStatus()
+      checkSpackInstallationStatus()
     })
     
     return {
@@ -599,7 +691,7 @@ export default {
       filteredAvailablePackages,
       filteredInstalledPackages,
       checkSpackStatus,
-      installSpack,
+      installSpack: installSpackHandler,
       refreshPackageLists,
       searchPackages,
       installPackage,

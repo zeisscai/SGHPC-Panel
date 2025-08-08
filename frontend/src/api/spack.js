@@ -5,6 +5,11 @@ export const fetchSpackStatus = () => {
   return axios.get('/api/spack/status')
 }
 
+// 获取 Spack 安装状态
+export const fetchSpackInstallationStatus = () => {
+  return axios.get('/api/spack/installation-status')
+}
+
 // 安装 Spack
 export const installSpack = () => {
   return axios.post('/api/spack/install')
