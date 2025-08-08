@@ -270,6 +270,8 @@ import {
   updateRepositories,
   fetchSpackInstallationStatus
 } from '../api/spack'
+
+export default {
   name: 'Spack',
   setup() {
     // Spack 状态 (not_installed, installed)
@@ -481,22 +483,14 @@ import {
       try {
         // 获取可安装的软件包
         loadingAvailablePackages.value = true
-        const availableResponse = await fetch('/api/spack/packages/available')
-        if (availableResponse.ok) {
-          availablePackages.value = await availableResponse.json()
-        } else {
-          console.error('获取可安装软件包列表失败:', await availableResponse.text())
-        }
+        const availableResponse = await fetchAvailablePackages()
+        availablePackages.value = availableResponse.data
         loadingAvailablePackages.value = false
         
         // 获取已安装的软件包
         loadingInstalledPackages.value = true
-        const installedResponse = await fetch('/api/spack/packages/installed')
-        if (installedResponse.ok) {
-          installedPackages.value = await installedResponse.json()
-        } else {
-          console.error('获取已安装软件包列表失败:', await installedResponse.text())
-        }
+        const installedResponse = await fetchInstalledPackages()
+        installedPackages.value = installedResponse.data
         loadingInstalledPackages.value = false
       } catch (error) {
         console.error('刷新软件包列表失败:', error)
@@ -514,7 +508,7 @@ import {
     }
     
     // 安装软件包
-    const installPackage = (packageItem, type) => {
+    const installPackageHandler = (packageItem, type) => {
       currentPackage.value = packageItem
       if (type === 'normal') {
         performInstall(packageItem.name)
@@ -532,6 +526,9 @@ import {
       installCompleted.value = false
       
       try {
+        // 启动安装过程
+        await installPackage(packageName, options)
+        
         // 连接到 WebSocket 端点以获取实时日志
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
         const wsUrl = `${protocol}//${window.location.host}/api/spack/package/install/logs?package=${encodeURIComponent(packageName)}&options=${encodeURIComponent(options)}`
@@ -582,28 +579,15 @@ import {
     }
     
     // 卸载软件包
-    const uninstallPackage = async (packageItem) => {
+    const uninstallPackageHandler = async (packageItem) => {
       if (!confirm(`确定要卸载 ${packageItem.name} 吗?`)) {
         return
       }
       
       try {
-        const response = await fetch('/api/spack/package/uninstall', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            package_name: packageItem.name
-          })
-        })
-        
-        if (response.ok) {
-          // 刷新已安装软件包列表
-          refreshPackageLists()
-        } else {
-          console.error('卸载软件包失败:', await response.text())
-        }
+        await uninstallPackage(packageItem.name)
+        // 刷新已安装软件包列表
+        refreshPackageLists()
       } catch (error) {
         console.error('卸载软件包失败:', error)
       }
@@ -612,37 +596,19 @@ import {
     // 修改软件源
     const modifyRepositories = async () => {
       try {
-        const response = await fetch('/api/spack/repositories')
-        if (response.ok) {
-          const data = await response.json()
-          repositories.value = data.content
-          showRepoDialog.value = true
-        } else {
-          console.error('获取软件源配置失败:', await response.text())
-        }
+        const response = await fetchRepositories()
+        repositories.value = response.data.content
+        showRepoDialog.value = true
       } catch (error) {
         console.error('获取软件源配置失败:', error)
       }
     }
     
     // 保存软件源配置
-    const saveRepositories = async () => {
+    const saveRepositoriesHandler = async () => {
       try {
-        const response = await fetch('/api/spack/repositories/update', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            content: repositories.value
-          })
-        })
-        
-        if (response.ok) {
-          showRepoDialog.value = false
-        } else {
-          console.error('保存软件源配置失败:', await response.text())
-        }
+        await updateRepositories(repositories.value)
+        showRepoDialog.value = false
       } catch (error) {
         console.error('保存软件源配置失败:', error)
       }
@@ -694,10 +660,10 @@ import {
       installSpack: installSpackHandler,
       refreshPackageLists,
       searchPackages,
-      installPackage,
-      uninstallPackage,
+      installPackage: installPackageHandler,
+      uninstallPackage: uninstallPackageHandler,
       modifyRepositories,
-      saveRepositories,
+      saveRepositories: saveRepositoriesHandler,
       confirmAdvancedInstall,
       closeLogDialog
     }
