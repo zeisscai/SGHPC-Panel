@@ -119,3 +119,4 @@ export default {
 .v-list-item--active {
   background-color: rgba(25, 118, 210, 0.1) !important;
 }
+</style>
