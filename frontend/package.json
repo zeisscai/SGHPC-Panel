@@ -4,8 +4,9 @@
   "description": "SGHPC Panel Frontend",
   "main": "index.js",
   "scripts": {
-    "serve": "vue-cli-service serve",
-    "build": "vue-cli-service build",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -21,8 +22,9 @@
     "vuetify": "^3.9.3"
   },
   "devDependencies": {
-    "@vue/cli-service": "^5.0.8",
+    "@vitejs/plugin-vue": "^5.2.1",
     "sass": "^1.89.2",
-    "sass-loader": "^16.0.5"
+    "vite": "^6.1.0",
+    "vite-plugin-vuetify": "^2.1.0"
   }
 }
