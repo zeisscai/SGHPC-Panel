@@ -69,7 +69,7 @@ project-root/
 
 ### Prerequisites
 - Go 1.24.5 or higher
-- Node.js and npm
+- Node.js and npm 22.14.0
 
 ### Setup Steps
 1. Clone the repository
