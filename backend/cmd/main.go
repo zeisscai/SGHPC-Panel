@@ -21,6 +21,8 @@ func main() {
 	http.HandleFunc("/api/file/list", api.HandleFileList)
 	http.HandleFunc("/api/file/delete", api.HandleFileDelete)
 	http.HandleFunc("/api/file/permissions", api.HandleFilePermissions)
+	http.HandleFunc("/api/file/mkdir", api.HandleFileMkdir)
+	http.HandleFunc("/api/file/rename", api.HandleFileRename)
 	
 	// Spack 相关路由
 	http.HandleFunc("/api/spack/status", api.HandleGetSpackStatus)

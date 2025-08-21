@@ -13,10 +13,12 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/creack/pty"
 	"github.com/gorilla/websocket"
+	"github.com/google/uuid"
 )
 
 // HandleGetManagementNode 处理获取管理节点信息请求
@@ -319,6 +321,99 @@ func HandleFilePermissions(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
+
+
+// HandleFileMkdir 处理创建目录请求
+func HandleFileMkdir(w http.ResponseWriter, r *http.Request) {
+	// 只允许POST方法
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	
+	// 解析请求体
+	var requestData struct {
+		Path string `json:"path"`
+	}
+	
+	if err := json.NewDecoder(r.Body).Decode(&requestData); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	
+	// 检查必需参数
+	if requestData.Path == "" {
+		http.Error(w, "Path is required", http.StatusBadRequest)
+		return
+	}
+	
+	// 创建目录
+	if err := os.MkdirAll(requestData.Path, 0755); err != nil {
+		http.Error(w, "Unable to create directory", http.StatusInternalServerError)
+		return
+	}
+	
+	// 返回成功响应
+	response := map[string]string{
+		"message": "Directory created successfully",
+	}
+	
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// HandleFileRename 处理文件重命名请求
+func HandleFileRename(w http.ResponseWriter, r *http.Request) {
+	// 只允许POST方法
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	
+	// 解析请求体
+	var requestData struct {
+		OldPath string `json:"oldPath"`
+		NewPath string `json:"newPath"`
+	}
+	
+	if err := json.NewDecoder(r.Body).Decode(&requestData); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	
+	// 检查必需参数
+	if requestData.OldPath == "" || requestData.NewPath == "" {
+		http.Error(w, "Old path and new path are required", http.StatusBadRequest)
+		return
+	}
+	
+	// 检查源文件是否存在
+	if _, err := os.Stat(requestData.OldPath); os.IsNotExist(err) {
+		http.Error(w, "Source file not found", http.StatusNotFound)
+		return
+	}
+	
+	// 检查目标路径是否已存在
+	if _, err := os.Stat(requestData.NewPath); err == nil {
+		http.Error(w, "Destination already exists", http.StatusConflict)
+		return
+	}
+	
+	// 重命名文件
+	if err := os.Rename(requestData.OldPath, requestData.NewPath); err != nil {
+		http.Error(w, "Unable to rename file", http.StatusInternalServerError)
+		return
+	}
+	
+	// 返回成功响应
+	response := map[string]string{
+		"message": "File renamed successfully",
+	}
+	
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
 // parseSymbolicPermissions 解析符号权限字符串（如 "rwxr-xr-x"）
 func parseSymbolicPermissions(permStr string) os.FileMode {
 	var perm os.FileMode
@@ -546,6 +641,72 @@ type WebSocketMessage struct {
 	Data interface{} `json:"data"`
 }
 
+// 定义会话结构体
+type TerminalSession struct {
+	ID        string
+	Conn      *websocket.Conn
+	PTY       *os.File
+	Cmd       *exec.Cmd
+	LastActive time.Time
+	Mutex      sync.Mutex
+}
+
+// 会话管理器
+type SessionManager struct {
+	Sessions map[string]*TerminalSession
+	Mutex    sync.RWMutex
+}
+
+// 创建新的会话管理器
+var sessionManager = &SessionManager{
+	Sessions: make(map[string]*TerminalSession),
+}
+
+// 会话超时时间（30分钟）
+const sessionTimeout = 30 * time.Minute
+
+// 启动会话清理器
+func init() {
+	go sessionCleaner()
+}
+
+// 定期清理过期会话
+func sessionCleaner() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		sessionManager.Mutex.Lock()
+		now := time.Now()
+		for id, session := range sessionManager.Sessions {
+			session.Mutex.Lock()
+			if now.Sub(session.LastActive) > sessionTimeout {
+				log.Printf("Cleaning up inactive session: %s", id)
+				// 关闭会话
+				closeSession(session)
+				// 从管理器中删除
+				delete(sessionManager.Sessions, id)
+			}
+			session.Mutex.Unlock()
+		}
+		sessionManager.Mutex.Unlock()
+	}
+}
+
+// 关闭会话
+func closeSession(session *TerminalSession) {
+	if session.Conn != nil {
+		session.Conn.Close()
+	}
+	if session.PTY != nil {
+		session.PTY.Close()
+	}
+	if session.Cmd != nil && session.Cmd.Process != nil {
+		session.Cmd.Process.Kill()
+		session.Cmd.Process.Wait()
+	}
+}
+
 // HandleWebSocket 处理WebSocket连接
 func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -553,7 +714,9 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Could not open websocket connection", http.StatusBadRequest)
 		return
 	}
-	defer conn.Close()
+
+	// 创建会话ID
+	sessionID := uuid.New().String()
 
 	// 直接启动一个bash shell，就像在本地终端一样
 	cmd := exec.Command("/bin/bash")
@@ -567,19 +730,35 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			Data: fmt.Sprintf("Failed to start pty: %v", err),
 		})
 		conn.WriteMessage(websocket.TextMessage, errorMsg)
+		conn.Close()
 		return
 	}
-	defer func() {
-		_ = ptmx.Close()
-		_ = cmd.Process.Kill()
-		_, _ = cmd.Process.Wait()
-	}()
+
+	// 创建并保存会话
+	session := &TerminalSession{
+		ID:        sessionID,
+		Conn:      conn,
+		PTY:       ptmx,
+		Cmd:       cmd,
+		LastActive: time.Now(),
+	}
+
+	sessionManager.Mutex.Lock()
+	sessionManager.Sessions[sessionID] = session
+	sessionManager.Mutex.Unlock()
 
 	// 设置初始窗口大小
 	pty.Setsize(ptmx, &pty.Winsize{
 		Rows: 30,
 		Cols: 120,
 	})
+
+	// 发送会话信息到客户端
+	welcomeMsg, _ := json.Marshal(WebSocketMessage{
+		Type: "output",
+		Data: fmt.Sprintf("\r\n欢迎使用终端！会话ID: %s\r\n", sessionID),
+	})
+	conn.WriteMessage(websocket.TextMessage, welcomeMsg)
 
 	// 启动goroutine处理PTY输出并转发到WebSocket
 	go func() {
@@ -593,12 +772,28 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 				// 发送EOF消息到前端
 				eofMsg, _ := json.Marshal(WebSocketMessage{
 					Type: "output",
-					Data: "\r\nSession ended.\r\n",
+					Data: "\r\n会话已结束.\r\n",
 				})
 				conn.WriteMessage(websocket.TextMessage, eofMsg)
-				conn.Close()
+
+				// 清理会话
+				sessionManager.Mutex.Lock()
+				if s, exists := sessionManager.Sessions[sessionID]; exists {
+					closeSession(s)
+					delete(sessionManager.Sessions, sessionID)
+				}
+				sessionManager.Mutex.Unlock()
 				return
 			}
+			
+			// 更新最后活动时间
+			sessionManager.Mutex.RLock()
+			if s, exists := sessionManager.Sessions[sessionID]; exists {
+				s.Mutex.Lock()
+				s.LastActive = time.Now()
+				s.Mutex.Unlock()
+			}
+			sessionManager.Mutex.RUnlock()
 			
 			// 将PTY输出转发到WebSocket
 			outputMsg, _ := json.Marshal(WebSocketMessage{
@@ -608,6 +803,14 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			err = conn.WriteMessage(websocket.TextMessage, outputMsg)
 			if err != nil {
 				log.Printf("Error writing to websocket: %v", err)
+				
+				// 清理会话
+				sessionManager.Mutex.Lock()
+				if s, exists := sessionManager.Sessions[sessionID]; exists {
+					closeSession(s)
+					delete(sessionManager.Sessions, sessionID)
+				}
+				sessionManager.Mutex.Unlock()
 				return
 			}
 		}
@@ -618,8 +821,25 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
 			log.Printf("Read error: %v", err)
+			
+			// 清理会话
+			sessionManager.Mutex.Lock()
+			if s, exists := sessionManager.Sessions[sessionID]; exists {
+				closeSession(s)
+				delete(sessionManager.Sessions, sessionID)
+			}
+			sessionManager.Mutex.Unlock()
 			break
 		}
+
+		// 更新最后活动时间
+		sessionManager.Mutex.RLock()
+		if s, exists := sessionManager.Sessions[sessionID]; exists {
+			s.Mutex.Lock()
+			s.LastActive = time.Now()
+			s.Mutex.Unlock()
+		}
+		sessionManager.Mutex.RUnlock()
 
 		// 解析消息
 		var msg WebSocketMessage
@@ -649,10 +869,10 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 				})
 			}
 		case CommandPing:
-			// 处理ping消息
+			// 处理心跳请求
 			pongMsg, _ := json.Marshal(WebSocketMessage{
 				Type: "pong",
-				Data: nil,
+				Data: time.Now().UnixNano() / int64(time.Millisecond),
 			})
 			conn.WriteMessage(websocket.TextMessage, pongMsg)
 		}
