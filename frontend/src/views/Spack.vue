@@ -106,6 +106,7 @@
                         no-data-text="未找到可安装的软件包"
                         :items-per-page="10"
                         class="elevation-1"
+                        :menu-props="{ zIndex: 9999 }"
                       >
                         <template v-slot:item.actions="{ item }">
                           <v-btn
@@ -141,6 +142,7 @@
                         no-data-text="未找到已安装的软件包"
                         :items-per-page="10"
                         class="elevation-1"
+                        :menu-props="{ zIndex: 9999 }"
                       >
                         <template v-slot:item.actions="{ item }">
                           <v-btn
