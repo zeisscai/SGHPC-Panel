@@ -512,6 +512,12 @@ export default {
     
     // 刷新软件包列表
     const refreshPackageLists = async () => {
+      // 检查Spack是否已安装
+      if (spackStatus.value !== 'installed') {
+        console.log('Spack 未安装，无法获取软件包列表')
+        return
+      }
+      
       isSpackRefreshing.value = true
       try {
         // 创建超时Promise
@@ -519,21 +525,44 @@ export default {
           setTimeout(() => reject(new Error('刷新超时')), 30000) // 30秒超时
         })
         
-        // 创建刷新Promise
-        const refreshPromise = activeTab.value === 'available' 
-          ? fetchAvailablePackages()
-          : fetchInstalledPackages()
-        
-        // 使用Promise.race实现超时控制
-        await Promise.race([refreshPromise, timeoutPromise])
+        if (activeTab.value === 'available') {
+          // 刷新可安装软件包列表
+          loadingAvailablePackages.value = true
+          try {
+            const refreshPromise = fetchAvailablePackages()
+            const response = await Promise.race([refreshPromise, timeoutPromise])
+            availablePackages.value = response.data || []
+          } catch (error) {
+            if (error.message === '刷新超时') {
+              console.error('刷新可安装软件包列表超时')
+            } else {
+              console.error('获取可安装软件包列表失败:', error)
+            }
+            availablePackages.value = []
+          } finally {
+            loadingAvailablePackages.value = false
+          }
+        } else {
+          // 刷新已安装软件包列表
+          loadingInstalledPackages.value = true
+          try {
+            const refreshPromise = fetchInstalledPackages()
+            const response = await Promise.race([refreshPromise, timeoutPromise])
+            installedPackages.value = response.data || []
+          } catch (error) {
+            if (error.message === '刷新超时') {
+              console.error('刷新已安装软件包列表超时')
+            } else {
+              console.error('获取已安装软件包列表失败:', error)
+            }
+            installedPackages.value = []
+          } finally {
+            loadingInstalledPackages.value = false
+          }
+        }
         
       } catch (error) {
-        if (error.message === '刷新超时') {
-          console.error('刷新超时，请检查网络连接或稍后重试')
-        } else {
-          console.error('刷新软件包列表失败:', error)
-          console.error('刷新失败: ' + error.message)
-        }
+        console.error('刷新软件包列表失败:', error)
       } finally {
         isSpackRefreshing.value = false
       }
