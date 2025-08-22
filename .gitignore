@@ -26,6 +26,8 @@ pnpm-debug.log*
 /bin/
 /vendor/
 backend/bin/
+backend/panel
+backend/server
 
 # 编辑器
 .vscode/
