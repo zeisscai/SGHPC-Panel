@@ -284,6 +284,13 @@ export default {
       loadFiles()
     })
     
+    // 当组件被激活时重新加载数据（处理从其他页面返回的情况）
+    onActivated(() => {
+      console.log('FileManagement component activated')
+      // 可以选择在这里重新加载文件列表
+      loadFiles()
+    })
+    
     // 加载文件列表
     const loadFiles = async () => {
       loading.value = true

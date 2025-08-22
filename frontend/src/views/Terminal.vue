@@ -207,7 +207,7 @@
 </template>
 
 <script>
-import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount, onActivated, onDeactivated } from 'vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
@@ -361,9 +361,28 @@ export default {
       clearReconnectTimeout()
       reconnectTimeout = setTimeout(() => {
         reconnectAttempts.value++
-        terminal.write(`\x1b[33m\r\n尝试重新连接 (${reconnectAttempts.value}/${maxReconnectAttempts})...\x1b[0m\r\n`)
+        if (terminal) {
+          terminal.write(`\x1b[33m\r\n尝试重新连接 (${reconnectAttempts.value}/${maxReconnectAttempts})...\x1b[0m\r\n`)
+        }
         connect()
       }, reconnectInterval)
+    }
+    
+    // 发送窗口大小调整消息
+    const sendResizeMessage = () => {
+      if (isConnected.value && websocket && websocket.readyState === WebSocket.OPEN && fitAddon) {
+        const dims = fitAddon.proposeDimensions()
+        if (dims && dims.cols > 0 && dims.rows > 0) {
+          const resizeMessage = JSON.stringify({
+            type: 'resize',
+            data: {
+              cols: dims.cols,
+              rows: dims.rows
+            }
+          })
+          websocket.send(resizeMessage)
+        }
+      }
     }
     
     // 连接到WebSocket
@@ -452,71 +471,11 @@ export default {
     // 断开连接
     const disconnect = () => {
       if (websocket) {
-        websocket.close(1000, "用户主动断开连接")
+        websocket.close()
         websocket = null
       }
       isConnected.value = false
       isConnecting.value = false
-      reconnectAttempts.value = 0
-      clearReconnectTimeout()
-      stopPingInterval()
-    }
-    
-    // 发送输入到终端
-    const sendInput = (data) => {
-      if (websocket && websocket.readyState === WebSocket.OPEN) {
-        const message = JSON.stringify({
-          type: 'input',
-          data: data
-        })
-        websocket.send(message)
-      }
-    }
-    
-    // 发送窗口大小调整消息
-    const sendResizeMessage = () => {
-      if (websocket && websocket.readyState === WebSocket.OPEN && terminal && fitAddon) {
-        const dims = fitAddon.proposeDimensions()
-        if (dims && dims.cols > 0 && dims.rows > 0) {
-          const message = JSON.stringify({
-            type: 'resize',
-            data: {
-              cols: dims.cols,
-              rows: dims.rows
-            }
-          })
-          websocket.send(message)
-        }
-      }
-    }
-    
-    // 组件挂载时初始化
-    onMounted(() => {
-      // 确保DOM已更新后再创建终端
-      setTimeout(() => {
-        createTerminal()
-        // 自动连接
-        // connect()
-      }, 100)
-    })
-    
-    // 组件卸载前清理
-    onBeforeUnmount(() => {
-      disconnect()
-      stopPingInterval()
-      clearReconnectTimeout()
-    })
-    
-    // 监听终端输入
-    terminal.onData((data) => {
-      sendInput(data)
-    })
-    
-    // 搜索终端内容
-    const searchTerminal = (searchTerm, options = {}) => {
-      if (searchAddon && searchTerm) {
-        searchAddon.findNext(searchTerm, options)
-      }
     }
     
     // 清空终端
@@ -532,125 +491,119 @@ export default {
         const selection = terminal.getSelection()
         if (selection) {
           navigator.clipboard.writeText(selection)
-            .then(() => terminal.write('\x1b[32m\r\n已复制选中内容到剪贴板\x1b[0m\r\n'))
-            .catch(err => terminal.write(`\x1b[31m\r\n复制失败: ${err}\x1b[0m\r\n`))
         }
       }
     }
     
-    // 粘贴内容到终端
+    // 粘贴到终端
     const pasteToTerminal = async () => {
       try {
         const text = await navigator.clipboard.readText()
-        sendInput(text)
-      } catch (err) {
-        terminal.write(`\x1b[31m\r\n粘贴失败: ${err}\x1b[0m\r\n`)
+        if (text && websocket && websocket.readyState === WebSocket.OPEN) {
+          const inputMessage = JSON.stringify({
+            type: 'input',
+            data: text
+          })
+          websocket.send(inputMessage)
+        }
+      } catch (error) {
+        console.error('Failed to paste text:', error)
       }
     }
     
-    // 监听连接状态变化
-    watch(isConnected, (newValue) => {
-      if (!newValue && reconnectAttempts.value < maxReconnectAttempts) {
-        tryReconnect()
+    // 搜索终端内容
+    const searchTerminal = (query) => {
+      if (searchAddon && query) {
+        searchAddon.findNext(query)
       }
-    })
-    
-    // 切换全屏模式
-    const toggleFullscreen = () => {
-      isFullscreen.value = !isFullscreen.value
-      const terminalElement = document.querySelector('.terminal-container')
-      
-      if (isFullscreen.value) {
-        if (terminalElement.requestFullscreen) {
-          terminalElement.requestFullscreen()
-        } else if (terminalElement.mozRequestFullScreen) {
-          terminalElement.mozRequestFullScreen()
-        } else if (terminalElement.webkitRequestFullscreen) {
-          terminalElement.webkitRequestFullscreen()
-        } else if (terminalElement.msRequestFullscreen) {
-          terminalElement.msRequestFullscreen()
-        }
-      } else {
-        if (document.exitFullscreen) {
-          document.exitFullscreen()
-        } else if (document.mozCancelFullScreen) {
-          document.mozCancelFullScreen()
-        } else if (document.webkitExitFullscreen) {
-          document.webkitExitFullscreen()
-        } else if (document.msExitFullscreen) {
-          document.msExitFullscreen()
-        }
-      }
-      
-      // 调整终端大小
-      setTimeout(() => {
-        if (fitAddon) {
-          fitAddon.fit()
-          sendResizeMessage()
-        }
-      }, 100)
     }
     
     // 应用主题
     const applyTheme = () => {
-      if (!terminal) return
-      
-      if (terminalTheme.value === '暗色') {
-        terminal.setOption('theme', {
+      if (terminal) {
+        const theme = terminalTheme.value === '暗色' ? {
           background: '#1e1e1e',
-          foreground: '#ffffff',
-          cursor: '#ffffff',
-          selection: 'rgba(255, 255, 255, 0.3)',
-          black: '#000000',
-          red: '#ff5555',
-          green: '#50fa7b',
-          yellow: '#f1fa8c',
-          blue: '#bd93f9',
-          magenta: '#ff79c6',
-          cyan: '#8be9fd',
-          white: '#bbbbbb',
-          brightBlack: '#555555',
-          brightRed: '#ff5555',
-          brightGreen: '#50fa7b',
-          brightYellow: '#f1fa8c',
-          brightBlue: '#bd93f9',
-          brightMagenta: '#ff79c6',
-          brightCyan: '#8be9fd',
-          brightWhite: '#ffffff'
-        })
-      } else {
-        terminal.setOption('theme', {
+          foreground: '#ffffff'
+        } : {
           background: '#ffffff',
-          foreground: '#333333',
-          cursor: '#333333',
-          selection: 'rgba(0, 0, 0, 0.3)',
-          black: '#000000',
-          red: '#cc0000',
-          green: '#4e9a06',
-          yellow: '#c4a000',
-          blue: '#3465a4',
-          magenta: '#75507b',
-          cyan: '#06989a',
-          white: '#d3d7cf',
-          brightBlack: '#555555',
-          brightRed: '#ef2929',
-          brightGreen: '#8ae234',
-          brightYellow: '#fce94f',
-          brightBlue: '#729fcf',
-          brightMagenta: '#ad7fa8',
-          brightCyan: '#34e2e2',
-          brightWhite: '#eeeeec'
-        })
+          foreground: '#000000'
+        }
+        terminal.setOption('theme', theme)
       }
     }
     
     // 应用字体大小
     const applyFontSize = () => {
-      if (!terminal) return
-      terminal.setOption('fontSize', fontSize.value)
-      if (fitAddon) {
-        fitAddon.fit()
-        sendResizeMessage()
+      if (terminal) {
+        terminal.setOption('fontSize', fontSize.value)
+        if (fitAddon) {
+          fitAddon.fit()
+        }
+      }
+    }
+    
+    // 切换全屏
+    const toggleFullscreen = () => {
+      if (!document.fullscreenElement) {
+        terminalContainer.value?.requestFullscreen()
+      } else {
+        document.exitFullscreen()
+      }
+    }
+    
+    // 组件挂载时初始化
+    onMounted(() => {
+      // 确保DOM已更新后再创建终端
+      setTimeout(() => {
+        createTerminal()
+        // 自动连接
+        // connect()
+      }, 100)
+    })
+    
+    // 组件激活时（路由切换回来时）
+    onActivated(() => {
+      console.log('Terminal component activated')
+      // 重新调整终端大小
+      if (fitAddon && isConnected.value) {
+        setTimeout(() => {
+          fitAddon.fit()
+          sendResizeMessage()
+        }, 100)
+      }
+    })
+    
+    // 组件停用时
+    onDeactivated(() => {
+      console.log('Terminal component deactivated')
+    })
+    
+    // 组件卸载前清理
+    onBeforeUnmount(() => {
+      disconnect()
+      stopPingInterval()
+      clearReconnectTimeout()
+    })
+    
+    // 监听终端输入
+    const handleTerminalInput = (data) => {
+      if (websocket && websocket.readyState === WebSocket.OPEN) {
+        const inputMessage = JSON.stringify({
+          type: 'input',
+          data: data
+        })
+        websocket.send(inputMessage)
+      }
+    }
+    
+    // 监听终端大小变化
+    const handleTerminalResize = (data) => {
+      if (websocket && websocket.readyState === WebSocket.OPEN) {
+        const resizeMessage = JSON.stringify({
+          type: 'resize',
+          data: data
+        })
+        websocket.send(resizeMessage)
       }
     }
     
@@ -662,13 +615,18 @@ export default {
       showSettings,
       terminalTheme,
       fontSize,
+      isFullscreen,
       connect,
       disconnect,
-      searchTerminal,
       clearTerminal,
       copySelection,
       pasteToTerminal,
-      toggleFullscreen
+      searchTerminal,
+      applyTheme,
+      applyFontSize,
+      toggleFullscreen,
+      handleTerminalInput,
+      handleTerminalResize
     }
   }
 }

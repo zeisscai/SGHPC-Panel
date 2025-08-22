@@ -96,7 +96,7 @@
               </template>
               <template v-slot:item.status="{ item }">
                 <v-chip 
-                  :color="item.status === 'High Load' ? 'error' : 'success'" 
+                  :color="getStatusColor(item.status)" 
                   dark
                 >
                   {{ item.status }}
@@ -115,6 +115,17 @@
             <v-icon left class="mr-2 overview-icon">mdi-format-list-bulleted</v-icon>
             SLURM Jobs
           </v-card-title>
+          <v-card-actions>
+            <v-btn 
+              color="primary" 
+              @click="reloadData"
+              :loading="loadingNodes || loadingJobs"
+              :disabled="loadingNodes || loadingJobs"
+            >
+              <v-icon left>mdi-refresh</v-icon>
+              Refresh Data
+            </v-btn>
+          </v-card-actions>
           <v-card-text>
             <v-alert v-if="jobStatusMessage" type="warning" outlined>
               {{ jobStatusMessage }}
@@ -127,6 +138,17 @@
               :loading="loadingJobs"
               hide-default-footer
             >
+              <template v-slot:item.submit_time="{ item }">
+                {{ new Date(item.submit_time).toLocaleString() }}
+              </template>
+              <template v-slot:item.status="{ item }">
+                <v-chip 
+                  :color="getStatusColor(item.status)" 
+                  dark
+                >
+                  {{ item.status }}
+                </v-chip>
+              </template>
               <template v-slot:item.submission_time="{ item }">
                 {{ new Date(item.submission_time).toLocaleString() }}
               </template>
@@ -161,26 +183,23 @@ export default {
     const nodeStatusMessage = ref('')
     const jobStatusMessage = ref('')
     
-    // 只显示等待或正在计算的作业（过滤掉已完成、取消的作业）
-    const activeJobs = computed(() => {
-      return slurmJobs.value.filter(job => job.status === 'pending' || job.status === 'running')
-    })
+    // 计算属性：活跃作业
+    const activeJobs = ref([])
     
     const nodeHeaders = [
       { title: 'Hostname', key: 'hostname' },
-      { title: 'IP Address', key: 'ip' },
-      { title: 'CPU Usage', key: 'cpu_usage' }, // 修改标题，去掉百分比符号
-      { title: 'Memory Usage', key: 'memory_usage' }, // 修改标题
+      { title: 'IP Address', key: 'ip_address' },
+      { title: 'CPU Usage', key: 'cpu_usage' },
+      { title: 'Memory Usage', key: 'memory_usage' },
       { title: 'Status', key: 'status' }
     ]
     
     const jobHeaders = [
       { title: 'Job ID', key: 'job_id' },
-      { title: 'Submit Time', key: 'submission_time' },
+      { title: 'Submit Time', key: 'submit_time' },
       { title: 'Wait Time', key: 'wait_time' },
       { title: 'Compute Time', key: 'compute_time' },
-      { title: 'User', key: 'user' },
-      { title: 'Status', key: 'status' }
+      { title: 'User', key: 'user' }
     ]
     
     const getUsageColor = (value) => {
@@ -250,19 +269,12 @@ export default {
       try {
         const jobs = await fetchSlurmJobs()
         if (jobs.length === 0) {
-          // 检查slurm是否安装
-          try {
-            await fetchComputeNodes() // 通过尝试获取节点信息来检查slurm状态
-            jobStatusMessage.value = 'Slurmctld已运行但没有客户端在线'
-          } catch (error) {
-            if (error.message.includes('Failed to fetch')) {
-              jobStatusMessage.value = 'Slurm未安装'
-            } else {
-              jobStatusMessage.value = '无法获取作业信息'
-            }
-          }
+          jobStatusMessage.value = '当前没有运行中的作业'
         } else {
           slurmJobs.value = jobs
+          activeJobs.value = jobs.filter(job => 
+            job.status === 'pending' || job.status === 'running'
+          )
         }
       } catch (error) {
         console.error('Failed to load SLURM jobs:', error)
@@ -272,10 +284,20 @@ export default {
       }
     }
     
-    onMounted(() => {
+    // 重新加载所有数据
+    const reloadData = () => {
       loadManagementNode()
       loadComputeNodes()
       loadSlurmJobs()
+    }
+    
+    onMounted(() => {
+      reloadData()
+    })
+    
+    // 当组件被激活时重新加载数据（处理从其他页面返回的情况）
+    onActivated(() => {
+      reloadData()
     })
     
     return {
@@ -291,6 +313,7 @@ export default {
       jobStatusMessage,
       getUsageColor,
       getStatusColor,
+      reloadData,
       Math // 添加Math对象以便在模板中使用
     }
   }
