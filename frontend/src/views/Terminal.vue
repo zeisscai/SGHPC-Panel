@@ -24,48 +24,46 @@
                   color="success"
                   size="small"
                   class="mr-2"
-                  variant="tonal"
                 >
-                  <v-icon left>mdi-connection</v-icon>
+                  <v-icon left>mdi-power</v-icon>
                   {{ isConnected ? '已连接' : '连接' }}
                 </v-btn>
+                
                 <v-btn 
                   @click="disconnect" 
                   :disabled="!isConnected"
                   color="error"
                   size="small"
                   class="mr-2"
-                  variant="tonal"
                 >
-                  <v-icon left>mdi-close-network</v-icon>
+                  <v-icon left>mdi-power-off</v-icon>
                   断开
                 </v-btn>
+                
                 <v-btn 
                   @click="clearTerminal" 
+                  color="warning"
+                  size="small"
+                  class="mr-2"
+                >
+                  <v-icon left>mdi-delete-sweep</v-icon>
+                  清屏
+                </v-btn>
+                
+                <v-btn 
+                  @click="copySelection" 
                   color="info"
                   size="small"
                   class="mr-2"
-                  variant="tonal"
-                >
-                  <v-icon left>mdi-eraser</v-icon>
-                  清屏
-                </v-btn>
-                <v-btn 
-                  @click="copySelection" 
-                  color="primary"
-                  size="small"
-                  class="mr-2"
-                  variant="tonal"
                 >
                   <v-icon left>mdi-content-copy</v-icon>
                   复制
                 </v-btn>
+                
                 <v-btn 
                   @click="pasteToTerminal" 
-                  color="primary"
+                  color="secondary"
                   size="small"
-                  class="mr-2"
-                  variant="tonal"
                 >
                   <v-icon left>mdi-content-paste</v-icon>
                   粘贴
@@ -75,15 +73,7 @@
               <v-spacer></v-spacer>
               
               <div class="d-flex align-center">
-                <v-text-field
-                  v-model="searchQuery"
-                  placeholder="搜索..."
-                  density="compact"
-                  hide-details
-                  class="search-field mr-2"
-                  prepend-inner-icon="mdi-magnify"
-                  @keyup.enter="searchTerminal(searchQuery)"
-                ></v-text-field>
+                
                 
                 <v-chip 
                   v-if="isConnected" 
@@ -210,8 +200,6 @@
 import { ref, onMounted, onBeforeUnmount, onActivated, onDeactivated } from 'vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
-import { WebLinksAddon } from '@xterm/addon-web-links'
-import { SearchAddon } from '@xterm/addon-search'
 import '@xterm/xterm/css/xterm.css'
 
 export default {
@@ -230,7 +218,6 @@ export default {
     const isFullscreen = ref(false)
     let terminal = null
     let fitAddon = null
-    let searchAddon = null
     let websocket = null
     let pingInterval = null
     let reconnectTimeout = null
@@ -275,13 +262,14 @@ export default {
         
         // 添加插件
         fitAddon = new FitAddon()
-        searchAddon = new SearchAddon()
+        
+        
+        // 创建并添加WebLinksAddon
         const webLinksAddon = new WebLinksAddon()
-        
+
         terminal.loadAddon(fitAddon)
-        terminal.loadAddon(searchAddon)
         terminal.loadAddon(webLinksAddon)
-        
+
         // 检查容器元素是否存在
         if (!terminalContainer.value) {
           console.error('Terminal container not found')
@@ -511,13 +499,6 @@ export default {
       }
     }
     
-    // 搜索终端内容
-    const searchTerminal = (query) => {
-      if (searchAddon && query) {
-        searchAddon.findNext(query)
-      }
-    }
-    
     // 应用主题
     const applyTheme = () => {
       if (terminal) {
@@ -611,7 +592,6 @@ export default {
       isConnected,
       isConnecting,
       terminalContainer,
-      searchQuery,
       showSettings,
       terminalTheme,
       fontSize,
@@ -621,7 +601,6 @@ export default {
       clearTerminal,
       copySelection,
       pasteToTerminal,
-      searchTerminal,
       applyTheme,
       applyFontSize,
       toggleFullscreen,

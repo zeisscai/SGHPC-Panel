@@ -149,17 +149,6 @@
                   {{ item.status }}
                 </v-chip>
               </template>
-              <template v-slot:item.submission_time="{ item }">
-                {{ new Date(item.submission_time).toLocaleString() }}
-              </template>
-              <template v-slot:item.status="{ item }">
-                <v-chip 
-                  :color="getStatusColor(item.status)" 
-                  dark
-                >
-                  {{ item.status }}
-                </v-chip>
-              </template>
             </v-data-table>
           </v-card-text>
         </v-card>
@@ -199,7 +188,8 @@ export default {
       { title: 'Submit Time', key: 'submit_time' },
       { title: 'Wait Time', key: 'wait_time' },
       { title: 'Compute Time', key: 'compute_time' },
-      { title: 'User', key: 'user' }
+      { title: 'User', key: 'user' },
+      { title: 'Status', key: 'status' }
     ]
     
     const getUsageColor = (value) => {
