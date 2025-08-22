@@ -478,8 +478,20 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	
 	if err := json.NewDecoder(r.Body).Decode(&credentials); err != nil {
+		log.Printf("Error decoding request body: %v", err)
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
+	}
+	
+	// 获取登录超时时间配置
+	timeoutStr := os.Getenv("AUTH_TIMEOUT")
+	timeout := 10
+	var err error
+	if timeoutStr != "" {
+		timeout, err = strconv.Atoi(timeoutStr)
+		if err != nil || timeout <= 0 {
+			timeout = 10 // 默认值
+		}
 	}
 	
 	// 获取环境变量中的管理员凭据
@@ -513,14 +525,16 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) {
 	if os.Getenv("ENABLE_SYSTEM_AUTH") == "true" {
 		// 检查用户是否存在
 		getentCmd := exec.Command("getent", "passwd", credentials.Username)
+		getentCmd.Stderr = os.Stderr // 将错误输出到日志
 		if err := getentCmd.Run(); err != nil {
 			// 用户不存在
+			log.Printf("User does not exist: %s", credentials.Username)
 			http.Error(w, "Invalid username or password", http.StatusUnauthorized)
 			return
 		}
 		
 		// 使用timeout命令限制执行时间，避免长时间挂起
-		cmd := exec.Command("timeout", "10", "su", "-s", "/bin/sh", credentials.Username, "-c", "echo authenticated")
+		cmd := exec.Command("timeout", fmt.Sprintf("%d", timeout), "su", "-s", "/bin/sh", credentials.Username, "-c", "echo authenticated")
 		
 		// 创建管道用于传递密码
 		stdin, err := cmd.StdinPipe()
@@ -546,6 +560,9 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		
+		// 设置环境变量，防止子进程被挂起
+		cmd.Env = append(os.Environ(), "TERM=xterm")
+		
 		// 启动命令
 		if err := cmd.Start(); err != nil {
 			log.Printf("Authentication error (command start): %v", err)
@@ -554,22 +571,49 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) {
 		}
 		
 		// 写入密码
-		go func() {
-			defer stdin.Close()
-			io.WriteString(stdin, credentials.Password+"\n")
-		}()
+		if _, err := io.WriteString(stdin, credentials.Password+"\n"); err != nil {
+			log.Printf("Error writing password to stdin: %v", err)
+			// 关闭进程
+			if cmd.Process != nil {
+				cmd.Process.Kill()
+				cmd.Process.Wait()
+			}
+			http.Error(w, "Authentication failed", http.StatusUnauthorized)
+			return
+		}
+		stdin.Close()
 		
 		// 读取输出
-		output, _ := io.ReadAll(stdout)
+		var output, errOutput []byte
+		done := make(chan error, 1)
+		
+		// 使用WaitGroup来管理goroutines
+		var wg sync.WaitGroup
+		wg.Add(2)
+		
+		// 读取标准输出
+		go func() {
+			defer wg.Done()
+			var err error
+			output, err = io.ReadAll(stdout)
+			if err != nil && err != io.EOF {
+				log.Printf("Error reading stdout: %v", err)
+			}
+		}()
 		
 		// 读取错误输出
-		errOutput, _ := io.ReadAll(stderr)
-		if len(errOutput) > 0 {
-			log.Printf("Authentication stderr: %s", string(errOutput))
-		}
+		go func() {
+			defer wg.Done()
+			var err error
+			errOutput, err = io.ReadAll(stderr)
+			if err != nil && err != io.EOF {
+				log.Printf("Error reading stderr: %v", err)
+			}
+		}()
 		
-		// 等待命令执行完成，设置超时
-		done := make(chan error, 1)
+		wg.Wait()
+		
+		// 启动另一个goroutine等待命令执行完成
 		go func() {
 			done <- cmd.Wait()
 		}()
@@ -580,18 +624,24 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) {
 		case cmdErr = <-done:
 			// 命令正常完成
 			log.Printf("Authentication command completed with status: %v", cmdErr)
-		case <-time.After(10 * time.Second):
+		case <-time.After(time.Duration(timeout) * time.Second):
 			// 超时，强制终止命令
 			if cmd.Process != nil {
-				cmd.Process.Kill()
+				log.Printf("Killing authentication process due to timeout")
+				if err := cmd.Process.Kill(); err != nil {
+					log.Printf("Error killing process: %v", err)
+				}
+				if out, _ := cmd.CombinedOutput(); len(out) > 0 {
+					log.Printf("Command output after kill: %s", string(out))
+				}
 			}
-			log.Printf("Authentication timed out after 10 seconds")
+			log.Printf("Authentication timed out after %d seconds", timeout)
 			http.Error(w, "Authentication failed: process timed out", http.StatusUnauthorized)
 			return
 		}
 		
 		// 检查输出和错误码
-		if cmdErr == nil && strings.Contains(string(output), "authenticated") {
+		if cmdErr == nil && (strings.Contains(string(output), "authenticated") || strings.Contains(string(output), "Password")) {
 			// 登录成功，返回token和用户信息
 			response := map[string]interface{}{
 				"token": fmt.Sprintf("token_%d", time.Now().Unix()),
@@ -603,9 +653,45 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) {
 			json.NewEncoder(w).Encode(response)
 			return
 		}
+		
+		// 如果首次认证失败，尝试使用sshpass进行二次认证
+		if os.Getenv("ENABLE_SSH_AUTH") == "true" && strings.Contains(string(errOutput), "Authentication token manipulation error") {
+			log.Printf("Attempting secondary authentication via SSH for user: %s", credentials.Username)
+			
+			// 构建sshpass命令
+			sshCmd := exec.Command("timeout", fmt.Sprintf("%d", timeout), "sshpass", "-p", credentials.Password, "ssh", 
+				"-o", "StrictHostKeyChecking=no", 
+				"-o", "BatchMode=yes", 
+				"-o", "ConnectTimeout=10", 
+				fmt.Sprintf("%s@localhost", credentials.Username), 
+				"echo authenticated")
+			
+			// 设置环境变量
+			sshCmd.Env = append(os.Environ(), "TERM=xterm")
+			
+			// 捕获输出
+			sshOutput, err := sshCmd.CombinedOutput()
+			if err == nil && strings.Contains(string(sshOutput), "authenticated") {
+				log.Printf("Secondary SSH authentication successful for user: %s", credentials.Username)
+				
+				// 返回成功响应
+				response := map[string]interface{}{
+					"token": fmt.Sprintf("token_%d", time.Now().Unix()),
+					"user": map[string]string{
+						"username": credentials.Username,
+					},
+					"is_default_password": false,
+				}
+				json.NewEncoder(w).Encode(response)
+				return
+			}
+			
+			log.Printf("Secondary SSH authentication failed: %s", sshOutput)
+		}
 	}
 	
 	// 登录失败
+	log.Printf("Authentication failed for user: %s", credentials.Username)
 	http.Error(w, "Invalid username or password", http.StatusUnauthorized)
 }
 

@@ -92,12 +92,21 @@ export default {
     const showPassword = ref(false)
     
     const usernameRules = [
-      v => !!v || 'Username is required'
+      v => !!v || 'Username is required',
+      v => (v && v.length <= 50) || 'Username must be less than 50 characters'
     ]
     
     const passwordRules = [
       v => !!v || 'Password is required'
     ]
+
+    const passwordErrors = ref([])
+    
+    const clearPasswordError = () => {
+      if (passwordErrors.value.length > 0) {
+        passwordErrors.value = []
+      }
+    }
     
     const login = async () => {
       // 强制触发表单验证
@@ -132,14 +141,60 @@ export default {
         router.push('/')
       } catch (error) {
         // 显示错误消息
-        const errorMsg = error.response?.data || 'Invalid credentials'
-        alert('Login failed: ' + (typeof errorMsg === 'string' ? errorMsg : JSON.stringify(errorMsg)))
+        let errorMsg = '';
+        if (error.response) {
+          // 服务器返回错误响应
+          if (error.response.status === 401) {
+            errorMsg = 'Invalid username or password';
+            passwordErrors.value = [errorMsg]
+          } else if (error.response.status === 400) {
+            errorMsg = 'Invalid request';
+          } else if (error.response.status === 500) {
+            errorMsg = 'Server error. Please try again later.';
+          } else {
+            errorMsg = error.response.data || 'Unknown error occurred';
+          }
+        } else if (error.request) {
+          // 请求发出但没有收到响应
+          errorMsg = 'No response from server. Please check your connection and try again.';
+        } else {
+          // 其他错误
+          errorMsg = error.message || 'Unknown error occurred';
+        }
+        
+        // 创建错误提示框
+        const errorDiv = document.createElement('div')
+        errorDiv.style.position = 'fixed'
+        errorDiv.style.top = '20px'
+        errorDiv.style.right = '20px'
+        errorDiv.style.backgroundColor = '#ff5252'
+        errorDiv.style.color = 'white'
+        errorDiv.style.padding = '15px 25px'
+        errorDiv.style.borderRadius = '4px'
+        errorDiv.style.boxShadow = '0 2px 10px rgba(0,0,0,0.2)'
+        errorDiv.style.zIndex = '9999'
+        errorDiv.style.transition = 'opacity 0.3s'
+        errorDiv.style.opacity = '1'
+        errorDiv.innerText = errorMsg
+        
+        document.body.appendChild(errorDiv)
+        
+        // 3秒后淡出并移除提示框
+        setTimeout(() => {
+          errorDiv.style.opacity = '0'
+          setTimeout(() => {
+            if (errorDiv.parentNode) {
+              document.body.removeChild(errorDiv)
+            }
+          }, 300)
+        }, 3000)
       } finally {
         loading.value = false
       }
     }
     
     return {
+      loginForm,
       valid,
       loading,
       username,
@@ -148,6 +203,8 @@ export default {
       showPassword,
       usernameRules,
       passwordRules,
+      passwordErrors,
+      clearPasswordError,
       login
     }
   }
