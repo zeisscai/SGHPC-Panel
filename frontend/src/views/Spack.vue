@@ -56,7 +56,7 @@
                     <v-btn
                       color="primary"
                       @click="refreshPackageLists"
-                      :loading="isRefreshing"
+                      :loading="isSpackRefreshing"
                       class="mr-2"
                     >
                       <v-icon left>mdi-refresh</v-icon>
@@ -285,7 +285,7 @@ export default {
     
     // 加载状态
     const isInstalling = ref(false)
-    const isRefreshing = ref(false)
+    const isSpackRefreshing = ref(false)
     const loadingAvailablePackages = ref(false)
     const loadingInstalledPackages = ref(false)
     
@@ -512,38 +512,30 @@ export default {
     
     // 刷新软件包列表
     const refreshPackageLists = async () => {
-      isRefreshing.value = true
+      isSpackRefreshing.value = true
       try {
-        // 根据当前选项卡刷新对应的列表
-        if (activeTab.value === 'available') {
-          // 刷新可安装软件包列表
-          loadingAvailablePackages.value = true
-          try {
-            const availableResponse = await fetchAvailablePackages()
-            availablePackages.value = availableResponse.data || []
-          } catch (error) {
-            console.error('获取可安装软件包列表失败:', error)
-            availablePackages.value = []
-          } finally {
-            loadingAvailablePackages.value = false
-          }
-        } else {
-          // 刷新已安装软件包列表
-          loadingInstalledPackages.value = true
-          try {
-            const installedResponse = await fetchInstalledPackages()
-            installedPackages.value = installedResponse.data || []
-          } catch (error) {
-            console.error('获取已安装软件包列表失败:', error)
-            installedPackages.value = []
-          } finally {
-            loadingInstalledPackages.value = false
-          }
-        }
+        // 创建超时Promise
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('刷新超时')), 30000) // 30秒超时
+        })
+        
+        // 创建刷新Promise
+        const refreshPromise = activeTab.value === 'available' 
+          ? fetchAvailablePackages()
+          : fetchInstalledPackages()
+        
+        // 使用Promise.race实现超时控制
+        await Promise.race([refreshPromise, timeoutPromise])
+        
       } catch (error) {
-        console.error('刷新软件包列表失败:', error)
+        if (error.message === '刷新超时') {
+          console.error('刷新超时，请检查网络连接或稍后重试')
+        } else {
+          console.error('刷新软件包列表失败:', error)
+          console.error('刷新失败: ' + error.message)
+        }
       } finally {
-        isRefreshing.value = false
+        isSpackRefreshing.value = false
       }
     }
     
@@ -713,7 +705,7 @@ export default {
       searchQuery,
       activeTab,
       isInstalling,
-      isRefreshing,
+      isSpackRefreshing,
       loadingAvailablePackages,
       loadingInstalledPackages,
       availablePackages,
