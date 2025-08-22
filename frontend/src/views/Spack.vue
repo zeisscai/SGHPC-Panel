@@ -99,20 +99,16 @@
                   <v-card flat>
                     <v-card-text>
                       <v-data-table
-                        :headers="availablePackagesHeaders"
-                        :items="filteredAvailablePackages"
-                        :loading="loadingAvailablePackages"
-                        loading-text="加载中..."
-                        no-data-text="未找到可安装的软件包"
-                        :items-per-page="100"
-                        :footer-props="{
-                          'items-per-page-options': [100, 1000, -1],
-                          'items-per-page-text': '每页显示:',
-                          'page-text': '{0}-{1} 共 {2} 条',
-                          'items-per-page-all-text': 'All'
-                        }"
-                        class="elevation-1"
-                      >
+              :headers="availablePackagesHeaders"
+              :items="filteredAvailablePackages"
+              :loading="loadingAvailablePackages"
+              loading-text="加载中..."
+              no-data-text="未找到可安装的软件包"
+              :items-per-page="100"
+              :items-per-page-options="[100, 1000, -1]"
+              items-per-page-text="每页显示:"
+              class="elevation-1"
+            >
                         <template v-slot:item.actions="{ item }">
                           <v-btn
                             color="primary"
@@ -140,20 +136,16 @@
                   <v-card flat>
                     <v-card-text>
                       <v-data-table
-                        :headers="installedPackagesHeaders"
-                        :items="filteredInstalledPackages"
-                        :loading="loadingInstalledPackages"
-                        loading-text="加载中..."
-                        no-data-text="未找到已安装的软件包"
-                        :items-per-page="100"
-                        :footer-props="{
-                          'items-per-page-options': [100, 1000, -1],
-                          'items-per-page-text': '每页显示:',
-                          'page-text': '{0}-{1} 共 {2} 条',
-                          'items-per-page-all-text': 'All'
-                        }"
-                        class="elevation-1"
-                      >
+              :headers="installedPackagesHeaders"
+              :items="filteredInstalledPackages"
+              :loading="loadingInstalledPackages"
+              loading-text="加载中..."
+              no-data-text="未找到已安装的软件包"
+              :items-per-page="100"
+              :items-per-page-options="[100, 1000, -1]"
+              items-per-page-text="每页显示:"
+              class="elevation-1"
+            >
                         <template v-slot:item.actions="{ item }">
                           <v-btn
                             color="error"
