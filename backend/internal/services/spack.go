@@ -27,16 +27,28 @@ type SpackService struct {
 	cacheTime      time.Time
 	cacheMutex     sync.RWMutex
 	cacheDuration  time.Duration
+	
+	// 日志持久化
+	logFilePath    string
 }
 
 // NewSpackService 创建新的 Spack 服务实例
 func NewSpackService() *SpackService {
-	return &SpackService{
+	homeDir, _ := os.UserHomeDir()
+	logFilePath := filepath.Join(homeDir, ".spack_install.log")
+	
+	service := &SpackService{
 		logger: utils.NewLogger(),
 		installing: false,
 		installLog: make([]string, 0),
 		cacheDuration: 30 * time.Second, // 缓存30秒
+		logFilePath: logFilePath,
 	}
+	
+	// 加载已有的日志
+	service.loadPersistedLog()
+	
+	return service
 }
 
 // SpackInfo Spack 信息结构体
@@ -180,14 +192,77 @@ func (s *SpackService) addInstallLog(message string) {
 	if len(s.installLog) > 1000 {
 		s.installLog = s.installLog[len(s.installLog)-1000:]
 	}
+	
+	// 异步保存到文件，避免阻塞
+	go s.saveLogToFile()
 }
 
-// clearInstallLog 清除安装日志
+// clearInstallLog 清空安装日志
 func (s *SpackService) clearInstallLog() {
 	s.installLogMutex.Lock()
 	defer s.installLogMutex.Unlock()
-	
 	s.installLog = make([]string, 0)
+	// 同时清空持久化日志
+	s.clearPersistedLog()
+}
+
+// loadPersistedLog 加载持久化的日志
+func (s *SpackService) loadPersistedLog() {
+	if _, err := os.Stat(s.logFilePath); os.IsNotExist(err) {
+		return // 文件不存在，跳过加载
+	}
+	
+	content, err := os.ReadFile(s.logFilePath)
+	if err != nil {
+		s.logger.Error(fmt.Sprintf("加载持久化日志失败: %v", err))
+		return
+	}
+	
+	if len(content) > 0 {
+		s.installLogMutex.Lock()
+		defer s.installLogMutex.Unlock()
+		s.installLog = strings.Split(strings.TrimSpace(string(content)), "\n")
+	}
+}
+
+// saveLogToFile 保存日志到文件
+func (s *SpackService) saveLogToFile() {
+	s.installLogMutex.Lock()
+	logContent := strings.Join(s.installLog, "\n")
+	s.installLogMutex.Unlock()
+	
+	err := os.WriteFile(s.logFilePath, []byte(logContent), 0644)
+	if err != nil {
+		s.logger.Error(fmt.Sprintf("保存日志到文件失败: %v", err))
+	}
+}
+
+// clearPersistedLog 清空持久化日志文件
+func (s *SpackService) clearPersistedLog() {
+	err := os.Remove(s.logFilePath)
+	if err != nil && !os.IsNotExist(err) {
+		s.logger.Error(fmt.Sprintf("清空持久化日志失败: %v", err))
+	}
+}
+
+// getSpackCommand 获取spack命令的完整路径
+func (s *SpackService) getSpackCommand() string {
+	// 首先尝试从PATH中查找
+	if spackPath, err := exec.LookPath("spack"); err == nil {
+		return spackPath
+	}
+	
+	// 如果PATH中找不到，尝试默认安装位置
+	homeDir, err := os.UserHomeDir()
+	if err == nil {
+		spackBinPath := filepath.Join(homeDir, "spack", "bin", "spack")
+		if _, err := os.Stat(spackBinPath); err == nil {
+			return spackBinPath
+		}
+	}
+	
+	// 如果都找不到，返回"spack"让系统处理错误
+	return "spack"
 }
 
 // detectOS 检测操作系统信息
@@ -810,23 +885,50 @@ func (s *SpackService) InstallSpack(logChan chan<- string) error {
 	s.addInstallLog(successMsg)
 	s.logger.Info("Spack 下载完成")
 
-	// 检出特定版本 (1.0.0)
+	// 获取最新的稳定版本标签
 	if logChan != nil {
-		logChan <- "正在检出 Spack 1.0.0 版本..."
+		logChan <- "正在获取最新的稳定版本..."
 	}
-	s.addInstallLog("正在检出 Spack 1.0.0 版本...")
-	s.logger.Info("正在检出 Spack 1.0.0 版本")
+	s.addInstallLog("正在获取最新的稳定版本...")
+	s.logger.Info("正在获取最新的稳定版本")
 	
-	cmd = exec.Command("git", "checkout", "v1.0.0")
-	cmd.Dir = spackDir
-	err = cmd.Run()
+	tagCmd := exec.Command("git", "tag", "-l", "v*", "--sort=-version:refname")
+	tagCmd.Dir = spackDir
+	tagOutput, err := tagCmd.Output()
 	if err != nil {
 		if logChan != nil {
-			logChan <- fmt.Sprintf("检出 Spack 1.0.0 版本失败: %v", err)
+			logChan <- "获取版本标签失败，使用默认分支"
 		}
-		s.addInstallLog(fmt.Sprintf("检出 Spack 1.0.0 版本失败: %v", err))
-		s.logger.Error(fmt.Sprintf("检出 Spack 1.0.0 版本失败: %v", err))
-		return err
+		s.addInstallLog("获取版本标签失败，使用默认分支")
+		s.logger.Error(fmt.Sprintf("获取版本标签失败: %v", err))
+	} else {
+		tags := strings.Split(strings.TrimSpace(string(tagOutput)), "\n")
+		if len(tags) > 0 && tags[0] != "" {
+			latestTag := tags[0]
+			if logChan != nil {
+				logChan <- fmt.Sprintf("正在检出最新版本 %s", latestTag)
+			}
+			s.addInstallLog(fmt.Sprintf("正在检出最新版本 %s", latestTag))
+			checkoutCmd := exec.Command("git", "checkout", latestTag)
+			checkoutCmd.Dir = spackDir
+			if output, err := checkoutCmd.CombinedOutput(); err != nil {
+				if logChan != nil {
+					logChan <- fmt.Sprintf("检出版本 %s 失败: %v，使用默认分支", latestTag, err)
+				}
+				s.addInstallLog(fmt.Sprintf("检出版本 %s 失败: %v，使用默认分支", latestTag, err))
+				s.logger.Error(fmt.Sprintf("检出版本 %s 失败: %v, 输出: %s", latestTag, err, string(output)))
+			} else {
+				if logChan != nil {
+					logChan <- fmt.Sprintf("成功检出版本 %s", latestTag)
+				}
+				s.addInstallLog(fmt.Sprintf("成功检出版本 %s", latestTag))
+			}
+		} else {
+			if logChan != nil {
+				logChan <- "未找到版本标签，使用默认分支"
+			}
+			s.addInstallLog("未找到版本标签，使用默认分支")
+		}
 	}
 
 	// 配置环境变量
@@ -941,8 +1043,9 @@ func (s *SpackService) GetAvailablePackages() ([]Package, error) {
 		return nil, fmt.Errorf("Spack 未安装")
 	}
 
-	// 执行 spack list 命令
-	cmd := exec.Command("spack", "list")
+	// 执行 spack list 命令，使用完整路径
+	spackCmd := s.getSpackCommand()
+	cmd := exec.Command(spackCmd, "list")
 	output, err := cmd.Output()
 	if err != nil {
 		s.logger.Error(fmt.Sprintf("执行 spack list 命令失败: %v", err))
@@ -988,8 +1091,9 @@ func (s *SpackService) GetInstalledPackages() ([]Package, error) {
 		return nil, fmt.Errorf("Spack 未安装")
 	}
 
-	// 执行 spack find 命令
-	cmd := exec.Command("spack", "find", "--format", "{name}@{version} {hash:7}")
+	// 执行 spack find 命令，使用完整路径
+	spackCmd := s.getSpackCommand()
+	cmd := exec.Command(spackCmd, "find", "--format", "{name}@{version} {hash:7}")
 	output, err := cmd.Output()
 	if err != nil {
 		s.logger.Error(fmt.Sprintf("执行 spack find 命令失败: %v", err))
@@ -1064,7 +1168,9 @@ func (s *SpackService) InstallPackage(packageName string, options string, logCha
 	}
 	args = append(args, packageName)
 
-	cmd := exec.Command("spack", args...)
+	// 执行安装命令，使用完整路径
+	spackCmd := s.getSpackCommand()
+	cmd := exec.Command(spackCmd, args...)
 	
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -1146,8 +1252,9 @@ func (s *SpackService) UninstallPackage(packageName string) error {
 		return fmt.Errorf("Spack 未安装")
 	}
 
-	// 执行卸载命令
-	cmd := exec.Command("spack", "uninstall", "-y", packageName)
+	// 执行卸载命令，使用完整路径
+	spackCmd := s.getSpackCommand()
+	cmd := exec.Command(spackCmd, "uninstall", "-y", packageName)
 	err := cmd.Run()
 	if err != nil {
 		s.logger.Error(fmt.Sprintf("卸载软件包失败: %v", err))

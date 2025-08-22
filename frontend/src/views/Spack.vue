@@ -698,12 +698,8 @@ export default {
         await refreshPackageLists()
       }
       
-      // 定期检查 Spack 安装状态，确保能及时更新界面
-      setInterval(() => {
-        if (!isInstalling.value) {
-          checkSpackStatus()
-        }
-      }, 10000) // 每10秒检查一次
+      // 移除定期检查，只在页面加载时检查一次，减少不必要的请求
+      // 用户可以通过刷新按钮手动更新状态
     })
     
     // 监听选项卡变化，刷新对应的数据
