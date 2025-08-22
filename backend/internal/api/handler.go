@@ -509,65 +509,100 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	// 如果默认凭据验证失败，尝试使用系统用户认证
-	// 检查用户是否存在
-	getentCmd := exec.Command("getent", "passwd", credentials.Username)
-	if err := getentCmd.Run(); err != nil {
-		// 用户不存在
-		http.Error(w, "Invalid username or password", http.StatusUnauthorized)
-		return
-	}
-	
-	// 使用su命令验证密码
-	cmd := exec.Command("su", "-s", "/bin/sh", credentials.Username, "-c", "echo authenticated")
-	
-	// 创建管道用于传递密码
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		log.Printf("Authentication error: %v", err)
-		http.Error(w, "Authentication failed", http.StatusUnauthorized)
-		return
-	}
-	
-	// 捕获stdout
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		log.Printf("Authentication error: %v", err)
-		http.Error(w, "Authentication failed", http.StatusUnauthorized)
-		return
-	}
-	
-	// 启动命令
-	if err := cmd.Start(); err != nil {
-		log.Printf("Authentication error: %v", err)
-		http.Error(w, "Authentication failed", http.StatusUnauthorized)
-		return
-	}
-	
-	// 写入密码
-	go func() {
-		defer stdin.Close()
-		io.WriteString(stdin, credentials.Password+"\n")
-	}()
-	
-	// 读取输出
-	output, _ := io.ReadAll(stdout)
-	
-	// 等待命令执行完成
-	err = cmd.Wait()
-	
-	// 检查输出和错误码
-	if err == nil && strings.Contains(string(output), "authenticated") {
-		// 登录成功，返回token和用户信息
-		response := map[string]interface{}{
-			"token": fmt.Sprintf("token_%d", time.Now().Unix()),
-			"user": map[string]string{
-				"username": credentials.Username,
-			},
-			"is_default_password": false,
+	// 如果默认凭据验证失败，尝试使用系统用户认证（如果启用）
+	if os.Getenv("ENABLE_SYSTEM_AUTH") == "true" {
+		// 检查用户是否存在
+		getentCmd := exec.Command("getent", "passwd", credentials.Username)
+		if err := getentCmd.Run(); err != nil {
+			// 用户不存在
+			http.Error(w, "Invalid username or password", http.StatusUnauthorized)
+			return
 		}
-		json.NewEncoder(w).Encode(response)
-		return
+		
+		// 使用timeout命令限制执行时间，避免长时间挂起
+		cmd := exec.Command("timeout", "10", "su", "-s", "/bin/sh", credentials.Username, "-c", "echo authenticated")
+		
+		// 创建管道用于传递密码
+		stdin, err := cmd.StdinPipe()
+		if err != nil {
+			log.Printf("Authentication error (stdin pipe): %v", err)
+			http.Error(w, "Authentication failed", http.StatusUnauthorized)
+			return
+		}
+		
+		// 捕获stdout
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			log.Printf("Authentication error (stdout pipe): %v", err)
+			http.Error(w, "Authentication failed", http.StatusUnauthorized)
+			return
+		}
+		
+		// 捕获stderr
+		stderr, err := cmd.StderrPipe()
+		if err != nil {
+			log.Printf("Authentication error (stderr pipe): %v", err)
+			http.Error(w, "Authentication failed", http.StatusUnauthorized)
+			return
+		}
+		
+		// 启动命令
+		if err := cmd.Start(); err != nil {
+			log.Printf("Authentication error (command start): %v", err)
+			http.Error(w, "Authentication failed", http.StatusUnauthorized)
+			return
+		}
+		
+		// 写入密码
+		go func() {
+			defer stdin.Close()
+			io.WriteString(stdin, credentials.Password+"\n")
+		}()
+		
+		// 读取输出
+		output, _ := io.ReadAll(stdout)
+		
+		// 读取错误输出
+		errOutput, _ := io.ReadAll(stderr)
+		if len(errOutput) > 0 {
+			log.Printf("Authentication stderr: %s", string(errOutput))
+		}
+		
+		// 等待命令执行完成，设置超时
+		done := make(chan error, 1)
+		go func() {
+			done <- cmd.Wait()
+		}()
+		
+		// 添加超时处理
+		var cmdErr error
+		select {
+		case cmdErr = <-done:
+			// 命令正常完成
+			log.Printf("Authentication command completed with status: %v", cmdErr)
+		case <-time.After(10 * time.Second):
+			// 超时，强制终止命令
+			if cmd.Process != nil {
+				cmd.Process.Kill()
+			}
+			log.Printf("Authentication timed out after 10 seconds")
+			http.Error(w, "Authentication failed: process timed out", http.StatusUnauthorized)
+			return
+		}
+		
+		// 检查输出和错误码
+		if cmdErr == nil && strings.Contains(string(output), "authenticated") {
+			// 登录成功，返回token和用户信息
+			response := map[string]interface{}{
+				"token": fmt.Sprintf("token_%d", time.Now().Unix()),
+				"user": map[string]string{
+					"username": credentials.Username,
+				},
+				"is_default_password": false,
+			}
+			json.NewEncoder(w).Encode(response)
+			return
+		}
 	}
 	
 	// 登录失败

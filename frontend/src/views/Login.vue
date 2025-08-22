@@ -10,7 +10,7 @@
           </v-toolbar>
           
           <v-card-text class="pa-8">
-            <v-form ref="loginForm" v-model="valid" @submit.prevent="login">
+            <v-form ref="loginForm" v-model="valid" @submit.prevent="login" autocomplete="off">
               <v-text-field
                 v-model="username"
                 label="Username"
@@ -81,6 +81,8 @@ import axios from 'axios'
 export default {
   name: 'Login',
   setup() {
+    const loginForm = ref(null)
+    const formErrors = ref([])
     const router = useRouter()
     const valid = ref(false)
     const loading = ref(false)
@@ -98,7 +100,9 @@ export default {
     ]
     
     const login = async () => {
-      if (!valid.value) return
+      // 强制触发表单验证
+      const { valid } = await loginForm.value.validate()
+      if (!valid) return
       
       loading.value = true
       
@@ -116,7 +120,7 @@ export default {
         localStorage.setItem('lastActivity', Date.now().toString())
         
         // 检查是否需要更改密码
-        if (user.shouldChangePassword) {
+        if (response.data.is_default_password) {
           localStorage.setItem('shouldChangePassword', 'true')
         }
         
@@ -128,7 +132,8 @@ export default {
         router.push('/')
       } catch (error) {
         // 显示错误消息
-        alert('Login failed: ' + (error.response?.data?.message || 'Invalid credentials'))
+        const errorMsg = error.response?.data || 'Invalid credentials'
+        alert('Login failed: ' + (typeof errorMsg === 'string' ? errorMsg : JSON.stringify(errorMsg)))
       } finally {
         loading.value = false
       }
