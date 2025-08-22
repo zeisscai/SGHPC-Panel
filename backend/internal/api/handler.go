@@ -534,7 +534,8 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) {
 		}
 		
 		// 使用timeout命令限制执行时间，避免长时间挂起
-		cmd := exec.Command("timeout", fmt.Sprintf("%d", timeout), "su", "-s", "/bin/sh", credentials.Username, "-c", "echo authenticated")
+		// 在Rocky Linux等系统上增加额外的选项确保命令正确终止
+		cmd := exec.Command("timeout", "-k", "1", fmt.Sprintf("%d", timeout), "su", "-s", "/bin/sh", credentials.Username, "-c", "echo authenticated")
 		
 		// 创建管道用于传递密码
 		stdin, err := cmd.StdinPipe()
@@ -631,9 +632,8 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) {
 				if err := cmd.Process.Kill(); err != nil {
 					log.Printf("Error killing process: %v", err)
 				}
-				if out, _ := cmd.CombinedOutput(); len(out) > 0 {
-					log.Printf("Command output after kill: %s", string(out))
-				}
+				// 等待进程完全终止
+				cmd.Process.Wait()
 			}
 			log.Printf("Authentication timed out after %d seconds", timeout)
 			http.Error(w, "Authentication failed: process timed out", http.StatusUnauthorized)
@@ -659,7 +659,7 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) {
 			log.Printf("Attempting secondary authentication via SSH for user: %s", credentials.Username)
 			
 			// 构建sshpass命令
-			sshCmd := exec.Command("timeout", fmt.Sprintf("%d", timeout), "sshpass", "-p", credentials.Password, "ssh", 
+			sshCmd := exec.Command("timeout", "-k", "1", fmt.Sprintf("%d", timeout), "sshpass", "-p", credentials.Password, "ssh", 
 				"-o", "StrictHostKeyChecking=no", 
 				"-o", "BatchMode=yes", 
 				"-o", "ConnectTimeout=10", 
