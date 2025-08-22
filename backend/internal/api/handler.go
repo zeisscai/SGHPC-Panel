@@ -490,6 +490,12 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 	
+	// 设置读取缓冲区大小
+	conn.SetReadLimit(65536)
+	
+	// 设置读取超时
+	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	
 	// 生成会话ID
 	sessionID := uuid.New().String()
 	
@@ -507,14 +513,26 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	sessionManager.Mutex.Unlock()
 	
 	// 发送欢迎消息
-	welcomeMsg, _ := json.Marshal(map[string]interface{}{
+	welcomeMsg, err := json.Marshal(map[string]interface{}{
 		"type": "output",
 		"data": fmt.Sprintf("\r\n欢迎使用终端！请输入服务器账户和密码进行登录。\r\n会话ID: %s\r\n\r\n请输入用户名: ", sessionID),
 	})
-	conn.WriteMessage(websocket.TextMessage, welcomeMsg)
+	if err != nil {
+		log.Printf("Error marshaling welcome message: %v", err)
+		return
+	}
+	
+	err = conn.WriteMessage(websocket.TextMessage, welcomeMsg)
+	if err != nil {
+		log.Printf("Error sending welcome message: %v", err)
+		return
+	}
 	
 	// 监听WebSocket消息
 	for {
+		// 更新读取超时
+		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		
 		messageType, message, err := conn.ReadMessage()
 		if err != nil {
 			// 连接已关闭，清理会话
@@ -524,6 +542,13 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 				delete(sessionManager.Sessions, sessionID)
 			}
 			sessionManager.Mutex.Unlock()
+			
+			// 检查是否为超时错误
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				log.Printf("WebSocket read timeout for session %s", sessionID)
+			} else {
+				log.Printf("WebSocket read error for session %s: %v", sessionID, err)
+			}
 			break
 		}
 		
@@ -585,7 +610,7 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 					
 					// 验证用户凭据
 					// 注意：这里应该使用实际的认证服务
-					if username == "admin" && password == "password" {
+					if authenticateUser(username, password) {
 						// 认证成功
 						sessionManager.Mutex.RLock()
 						if s, exists := sessionManager.Sessions[sessionID]; exists {
@@ -661,8 +686,9 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 // 验证用户凭据
 func authenticateUser(username, password string) bool {
-	// 简单的验证逻辑，实际项目中应该查询数据库或使用其他认证机制
-	return username == "admin" && password == "password"
+	// 使用实际的认证服务
+	authService := services.NewAuthService()
+	return authService.AuthenticateUser(username, password)
 }
 
 // 启动PTY并处理输出的函数
@@ -670,7 +696,7 @@ func startPTYAndHandleOutput(session *TerminalSession) {
 	// 发送登录成功消息
 	successMsg, _ := json.Marshal(map[string]interface{}{
 		"type": "output",
-		"data": fmt.Sprintf("\r\n登录成功! 欢迎 %s\r\n\r\n", session.Username),
+		"data": fmt.Sprintf("\r\n登录成功! 欢迎 %s\r\n\r\n$ ", session.Username),
 	})
 	
 	// 获取WebSocket连接
@@ -683,10 +709,21 @@ func startPTYAndHandleOutput(session *TerminalSession) {
 		return
 	}
 	
-	conn.WriteMessage(websocket.TextMessage, successMsg)
+	err := conn.WriteMessage(websocket.TextMessage, successMsg)
+	if err != nil {
+		log.Printf("Error sending success message: %v", err)
+		return
+	}
 	
 	// 启动一个bash shell
 	cmd := exec.Command("/bin/bash")
+	
+	// 设置环境变量
+	cmd.Env = append(os.Environ(),
+		"TERM=xterm-256color",
+		fmt.Sprintf("USER=%s", session.Username),
+		fmt.Sprintf("HOME=/home/%s", session.Username),
+	)
 	
 	// 创建伪终端
 	ptmx, err := pty.Start(cmd)

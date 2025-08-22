@@ -260,48 +260,66 @@ export default {
         brightWhite: '#ffffff'
       }
       
-      terminal = new Terminal({
-        cursorBlink: true,
-        theme: darkTheme,
-        fontSize: fontSize.value,
-        fontFamily: 'Monaco, Consolas, "Courier New", monospace',
-        scrollback: 5000,
-        allowTransparency: true,
-        cursorStyle: 'block',
-        convertEol: true,
-        rendererType: 'canvas'
-      })
-      
-      // 添加插件
-      fitAddon = new FitAddon()
-      searchAddon = new SearchAddon()
-      const webLinksAddon = new WebLinksAddon()
-      
-      terminal.loadAddon(fitAddon)
-      terminal.loadAddon(searchAddon)
-      terminal.loadAddon(webLinksAddon)
-      
-      // 打开终端
-      terminal.open(terminalContainer.value)
-      fitAddon.fit()
-      
-      // 监听终端大小变化
-      const resizeObserver = new ResizeObserver(() => {
-        if (isConnected.value && fitAddon) {
-          fitAddon.fit()
-          sendResizeMessage()
+      try {
+        terminal = new Terminal({
+          cursorBlink: true,
+          theme: darkTheme,
+          fontSize: fontSize.value,
+          fontFamily: 'Monaco, Consolas, "Courier New", monospace',
+          scrollback: 5000,
+          allowTransparency: true,
+          cursorStyle: 'block',
+          convertEol: true,
+          rendererType: 'canvas'
+        })
+        
+        // 添加插件
+        fitAddon = new FitAddon()
+        searchAddon = new SearchAddon()
+        const webLinksAddon = new WebLinksAddon()
+        
+        terminal.loadAddon(fitAddon)
+        terminal.loadAddon(searchAddon)
+        terminal.loadAddon(webLinksAddon)
+        
+        // 检查容器元素是否存在
+        if (!terminalContainer.value) {
+          console.error('Terminal container not found')
+          return
         }
-      })
-      
-      resizeObserver.observe(terminalContainer.value)
-      
-      // 监听窗口大小变化
-      window.addEventListener('resize', () => {
-        if (isConnected.value && fitAddon) {
-          fitAddon.fit()
-          sendResizeMessage()
+        
+        // 打开终端
+        terminal.open(terminalContainer.value)
+        fitAddon.fit()
+        
+        // 写入初始消息
+        terminal.write('正在初始化终端...\r\n')
+        
+        // 监听终端大小变化
+        const resizeObserver = new ResizeObserver(() => {
+          if (isConnected.value && fitAddon) {
+            fitAddon.fit()
+            sendResizeMessage()
+          }
+        })
+        
+        resizeObserver.observe(terminalContainer.value)
+        
+        // 监听窗口大小变化
+        window.addEventListener('resize', () => {
+          if (isConnected.value && fitAddon) {
+            fitAddon.fit()
+            sendResizeMessage()
+          }
+        })
+      } catch (error) {
+        console.error('Failed to create terminal:', error)
+        if (terminalContainer.value) {
+          terminalContainer.value.innerHTML = `<div style="color: red; padding: 10px;">
+            终端初始化失败: ${error.message}
+          </div>`
         }
-      })
+      }
     }
     
     // 开始心跳检测
@@ -366,7 +384,9 @@ export default {
           clearReconnectTimeout()
           startPingInterval()
           sendResizeMessage() // 连接成功后立即发送终端大小
-          terminal.write('\x1b[32m\r\n连接成功!\x1b[0m\r\n')
+          if (terminal) {
+            terminal.write('\x1b[32m\r\n连接成功!\x1b[0m\r\n')
+          }
         }
         
         websocket.onmessage = (event) => {
@@ -374,10 +394,14 @@ export default {
             const message = JSON.parse(event.data)
             switch (message.type) {
               case 'output':
-                terminal.write(message.data)
+                if (terminal) {
+                  terminal.write(message.data)
+                }
                 break
               case 'error':
-                terminal.write(`\x1b[31m${message.data}\x1b[0m\r\n`)
+                if (terminal) {
+                  terminal.write(`\x1b[31m${message.data}\x1b[0m\r\n`)
+                }
                 break
               case 'pong':
                 // 心跳响应，不做处理
@@ -385,7 +409,17 @@ export default {
             }
           } catch (error) {
             console.error('Failed to parse message:', error)
-            terminal.write(`\x1b[31m消息解析错误: ${error.message || '未知错误'}\x1b[0m\r\n`)
+            if (terminal) {
+              terminal.write(`\x1b[31m消息解析错误: ${error.message || '未知错误'}\x1b[0m\r\n`)
+            }
+          }
+        }
+        
+        websocket.onerror = (error) => {
+          console.error('WebSocket error:', error)
+          isConnecting.value = false
+          if (terminal) {
+            terminal.write(`\x1b[31m\r\nWebSocket连接错误: ${error.message || '未知错误'}\x1b[0m\r\n`)
           }
         }
         
@@ -394,22 +428,24 @@ export default {
           isConnecting.value = false
           stopPingInterval()
           
-          if (event.wasClean) {
-            terminal.write(`\x1b[33m\r\n连接已关闭: 代码=${event.code} 原因=${event.reason || '未知'}\x1b[0m\r\n`)
+          if (terminal) {
+            if (event.wasClean) {
+              terminal.write(`\x1b[33m\r\n连接已关闭: 代码=${event.code} 原因=${event.reason || '未知'}\x1b[0m\r\n`)
+            } else {
+              terminal.write('\x1b[31m\r\n连接意外断开\x1b[0m\r\n')
+              tryReconnect()
+            }
           } else {
-            terminal.write('\x1b[31m\r\n连接意外断开\x1b[0m\r\n')
+            console.log('WebSocket closed:', event)
             tryReconnect()
           }
         }
-        
-        websocket.onerror = (error) => {
-          isConnecting.value = false
-          terminal.write(`\x1b[31m连接错误: ${error.message || '未知错误'}\x1b[0m\r\n`)
-        }
       } catch (error) {
+        console.error('Failed to create WebSocket connection:', error)
         isConnecting.value = false
-        terminal.write(`\x1b[31m连接失败: ${error.message || '未知错误'}\x1b[0m\r\n`)
-        tryReconnect()
+        if (terminal) {
+          terminal.write(`\x1b[31m\r\n连接失败: ${error.message || '未知错误'}\x1b[0m\r\n`)
+        }
       }
     }
     
@@ -454,16 +490,26 @@ export default {
       }
     }
     
+    // 组件挂载时初始化
     onMounted(() => {
-      createTerminal()
-      
-      // 监听终端输入
-      terminal.onData((data) => {
-        sendInput(data)
-      })
-      
-      // 自动连接
-      connect()
+      // 确保DOM已更新后再创建终端
+      setTimeout(() => {
+        createTerminal()
+        // 自动连接
+        // connect()
+      }, 100)
+    })
+    
+    // 组件卸载前清理
+    onBeforeUnmount(() => {
+      disconnect()
+      stopPingInterval()
+      clearReconnectTimeout()
+    })
+    
+    // 监听终端输入
+    terminal.onData((data) => {
+      sendInput(data)
     })
     
     // 搜索终端内容
@@ -506,15 +552,6 @@ export default {
     watch(isConnected, (newValue) => {
       if (!newValue && reconnectAttempts.value < maxReconnectAttempts) {
         tryReconnect()
-      }
-    })
-    
-    onBeforeUnmount(() => {
-      disconnect()
-      clearReconnectTimeout()
-      stopPingInterval()
-      if (terminal) {
-        terminal.dispose()
       }
     })
     
@@ -670,8 +707,9 @@ export default {
 .terminal-container {
   height: 65vh; /* 使用视口高度 */
   min-height: 400px; /* 最小高度 */
-  padding: 0;
+  padding: 12px;
   overflow: hidden;
+  background-color: #1e1e1e; /* 添加默认背景色 */
 }
 
 .terminal-container.connected {
