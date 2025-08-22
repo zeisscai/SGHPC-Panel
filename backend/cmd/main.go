@@ -44,8 +44,8 @@ func main() {
 	http.Handle("/", http.FileServer(http.Dir("./frontend/dist/")))
 	
 	// 启动服务器
-	log.Println("Server starting on :8080")
-	err := http.ListenAndServe(":8080", nil)
+	log.Println("Server starting on :8081")
+	err := http.ListenAndServe(":8081", nil)
 	if err != nil {
 		log.Fatal("Server failed to start: ", err)
 	}

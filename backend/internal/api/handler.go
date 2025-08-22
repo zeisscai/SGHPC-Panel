@@ -649,6 +649,9 @@ type TerminalSession struct {
 	Cmd       *exec.Cmd
 	LastActive time.Time
 	Mutex      sync.Mutex
+	AuthState  TerminalAuthState
+	Username   string
+	Password   string
 }
 
 // 会话管理器
@@ -707,6 +710,15 @@ func closeSession(session *TerminalSession) {
 	}
 }
 
+// TerminalAuthState 表示终端认证状态
+type TerminalAuthState int
+
+const (
+	AuthNone TerminalAuthState = iota // 未认证
+	AuthPending                       // 等待认证
+	AuthSuccess                       // 认证成功
+)
+
 // HandleWebSocket 处理WebSocket连接
 func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -718,163 +730,215 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// 创建会话ID
 	sessionID := uuid.New().String()
 
-	// 直接启动一个bash shell，就像在本地终端一样
-	cmd := exec.Command("/bin/bash")
-	
-	// 启动PTY
-	ptmx, err := pty.Start(cmd)
-	if err != nil {
-		log.Printf("Failed to start pty: %v", err)
-		errorMsg, _ := json.Marshal(WebSocketMessage{
-			Type: "error",
-			Data: fmt.Sprintf("Failed to start pty: %v", err),
-		})
-		conn.WriteMessage(websocket.TextMessage, errorMsg)
-		conn.Close()
-		return
-	}
-
-	// 创建并保存会话
+	// 创建并保存会话，初始状态为未认证
 	session := &TerminalSession{
-		ID:        sessionID,
-		Conn:      conn,
-		PTY:       ptmx,
-		Cmd:       cmd,
+		ID:         sessionID,
+		Conn:       conn,
+		PTY:        nil,
+		Cmd:        nil,
 		LastActive: time.Now(),
+		AuthState:  AuthNone,
+		Username:   "",
+		Password:   "",
 	}
 
 	sessionManager.Mutex.Lock()
 	sessionManager.Sessions[sessionID] = session
 	sessionManager.Mutex.Unlock()
 
+	// 发送会话信息到客户端
+	welcomeMsg, _ := json.Marshal(WebSocketMessage{
+		Type: "output",
+		Data: fmt.Sprintf("\r\n欢迎使用终端！请输入服务器账户和密码进行登录。\r\n会话ID: %s\r\n\r\n请输入用户名: ", sessionID),
+	})
+	conn.WriteMessage(websocket.TextMessage, welcomeMsg)
+}
+
+// 验证用户凭据
+func authenticateUser(username, password string) bool {
+	// 首先检查是否是管理员账户
+	adminUsername := os.Getenv("ADMIN_USERNAME")
+	adminPassword := os.Getenv("ADMIN_PASSWORD")
+	
+	// 如果环境变量未设置，则使用默认值
+	if adminUsername == "" {
+		adminUsername = "admin"
+	}
+	
+	if adminPassword == "" {
+		adminPassword = "password"
+	}
+	
+	// 检查是否是管理员账户
+	if username == adminUsername && password == adminPassword {
+		log.Printf("管理员账户登录成功: %s", username)
+		return true
+	}
+	
+	// 自定义验证逻辑
+	// 这里可以实现自定义的用户验证逻辑，例如查询数据库等
+	// 为了演示，我们添加一些硬编码的用户
+	validUsers := map[string]string{
+		"user1": "password1",
+		"user2": "password2",
+		"test":  "test",
+	}
+	
+	if storedPassword, exists := validUsers[username]; exists && storedPassword == password {
+		log.Printf("自定义用户登录成功: %s", username)
+		return true
+	}
+	
+	// 如果需要，可以保留系统用户认证作为备选
+	// 但在生产环境中应谨慎使用，确保安全性
+	if os.Getenv("ENABLE_SYSTEM_AUTH") == "true" {
+		// 检查用户是否存在
+		getentCmd := exec.Command("getent", "passwd", username)
+		if err := getentCmd.Run(); err != nil {
+			// 用户不存在
+			log.Printf("系统用户不存在: %s", username)
+			return false
+		}
+		
+		// 使用su命令验证密码
+		cmd := exec.Command("su", "-s", "/bin/sh", username, "-c", "echo authenticated")
+		
+		// 创建管道用于传递密码
+		stdin, err := cmd.StdinPipe()
+		if err != nil {
+			log.Printf("Authentication error: %v", err)
+			return false
+		}
+		
+		// 捕获stdout
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			log.Printf("Authentication error: %v", err)
+			return false
+		}
+		
+		// 启动命令
+		if err := cmd.Start(); err != nil {
+			log.Printf("Authentication error: %v", err)
+			return false
+		}
+		
+		// 写入密码
+		go func() {
+			defer stdin.Close()
+			io.WriteString(stdin, password+"\n")
+		}()
+		
+		// 读取输出
+		output, _ := io.ReadAll(stdout)
+		
+		// 等待命令执行完成
+		err = cmd.Wait()
+		
+		// 检查输出和错误码
+		if err == nil && strings.Contains(string(output), "authenticated") {
+			log.Printf("系统用户登录成功: %s", username)
+			return true
+		}
+	}
+	
+	log.Printf("用户验证失败: %s", username)
+	return false
+}
+
+// 启动PTY并处理输出的函数
+func startPTYAndHandleOutput(session *TerminalSession) {
+	// 获取WebSocket连接
+	session.Mutex.Lock()
+	conn := session.Conn
+	session.Mutex.Unlock()
+	
+	if conn == nil {
+		log.Printf("Error: WebSocket connection is nil")
+		return
+	}
+	
+	// 发送登录成功消息
+	successMsg, _ := json.Marshal(WebSocketMessage{
+		Type: "output",
+		Data: fmt.Sprintf("\r\n登录成功! 欢迎 %s\r\n\r\n", session.Username),
+	})
+	conn.WriteMessage(websocket.TextMessage, successMsg)
+	
+	// 启动一个bash shell
+	cmd := exec.Command("/bin/bash")
+	
+	// 创建伪终端
+	ptmx, err := pty.Start(cmd)
+	if err != nil {
+		log.Printf("Error starting pty: %v", err)
+		errorMsg, _ := json.Marshal(WebSocketMessage{
+			Type: "output",
+			Data: fmt.Sprintf("\r\n启动终端失败: %v\r\n", err),
+		})
+		conn.WriteMessage(websocket.TextMessage, errorMsg)
+		return
+	}
+	
+	// 更新会话信息
+	session.Mutex.Lock()
+	session.PTY = ptmx
+	session.Cmd = cmd
+	session.Mutex.Unlock()
+
 	// 设置初始窗口大小
 	pty.Setsize(ptmx, &pty.Winsize{
 		Rows: 30,
 		Cols: 120,
 	})
-
-	// 发送会话信息到客户端
-	welcomeMsg, _ := json.Marshal(WebSocketMessage{
-		Type: "output",
-		Data: fmt.Sprintf("\r\n欢迎使用终端！会话ID: %s\r\n", sessionID),
-	})
-	conn.WriteMessage(websocket.TextMessage, welcomeMsg)
-
-	// 启动goroutine处理PTY输出并转发到WebSocket
-	go func() {
-		buf := make([]byte, 1024)
-		for {
-			n, err := ptmx.Read(buf)
-			if err != nil {
-				if err != io.EOF {
-					log.Printf("Error reading from pty: %v", err)
-				}
-				// 发送EOF消息到前端
-				eofMsg, _ := json.Marshal(WebSocketMessage{
-					Type: "output",
-					Data: "\r\n会话已结束.\r\n",
-				})
-				conn.WriteMessage(websocket.TextMessage, eofMsg)
-
-				// 清理会话
-				sessionManager.Mutex.Lock()
-				if s, exists := sessionManager.Sessions[sessionID]; exists {
-					closeSession(s)
-					delete(sessionManager.Sessions, sessionID)
-				}
-				sessionManager.Mutex.Unlock()
-				return
-			}
-			
-			// 更新最后活动时间
-			sessionManager.Mutex.RLock()
-			if s, exists := sessionManager.Sessions[sessionID]; exists {
-				s.Mutex.Lock()
-				s.LastActive = time.Now()
-				s.Mutex.Unlock()
-			}
-			sessionManager.Mutex.RUnlock()
-			
-			// 将PTY输出转发到WebSocket
-			outputMsg, _ := json.Marshal(WebSocketMessage{
-				Type: "output",
-				Data: string(buf[:n]),
-			})
-			err = conn.WriteMessage(websocket.TextMessage, outputMsg)
-			if err != nil {
-				log.Printf("Error writing to websocket: %v", err)
-				
-				// 清理会话
-				sessionManager.Mutex.Lock()
-				if s, exists := sessionManager.Sessions[sessionID]; exists {
-					closeSession(s)
-					delete(sessionManager.Sessions, sessionID)
-				}
-				sessionManager.Mutex.Unlock()
-				return
-			}
-		}
-	}()
-
-	// 处理来自WebSocket的输入并转发到PTY
+	
+	// 处理PTY输出并转发到WebSocket
+	buf := make([]byte, 1024)
 	for {
-		_, message, err := conn.ReadMessage()
+		n, err := ptmx.Read(buf)
 		if err != nil {
-			log.Printf("Read error: %v", err)
+			if err != io.EOF {
+				log.Printf("Error reading from pty: %v", err)
+			}
+			// 发送EOF消息到前端
+			eofMsg, _ := json.Marshal(WebSocketMessage{
+				Type: "output",
+				Data: "\r\n会话已结束.\r\n",
+			})
+			conn.WriteMessage(websocket.TextMessage, eofMsg)
+
+			// 清理会话
+			sessionManager.Mutex.Lock()
+			if s, exists := sessionManager.Sessions[session.ID]; exists {
+				closeSession(s)
+				delete(sessionManager.Sessions, session.ID)
+			}
+			sessionManager.Mutex.Unlock()
+			return
+		}
+		
+		// 更新最后活动时间
+		session.Mutex.Lock()
+		session.LastActive = time.Now()
+		session.Mutex.Unlock()
+		
+		// 将PTY输出转发到WebSocket
+		outputMsg, _ := json.Marshal(WebSocketMessage{
+			Type: "output",
+			Data: string(buf[:n]),
+		})
+		err = conn.WriteMessage(websocket.TextMessage, outputMsg)
+		if err != nil {
+			log.Printf("Error writing to websocket: %v", err)
 			
 			// 清理会话
 			sessionManager.Mutex.Lock()
-			if s, exists := sessionManager.Sessions[sessionID]; exists {
+			if s, exists := sessionManager.Sessions[session.ID]; exists {
 				closeSession(s)
-				delete(sessionManager.Sessions, sessionID)
+				delete(sessionManager.Sessions, session.ID)
 			}
 			sessionManager.Mutex.Unlock()
-			break
-		}
-
-		// 更新最后活动时间
-		sessionManager.Mutex.RLock()
-		if s, exists := sessionManager.Sessions[sessionID]; exists {
-			s.Mutex.Lock()
-			s.LastActive = time.Now()
-			s.Mutex.Unlock()
-		}
-		sessionManager.Mutex.RUnlock()
-
-		// 解析消息
-		var msg WebSocketMessage
-		if err := json.Unmarshal(message, &msg); err != nil {
-			log.Printf("Error unmarshaling message: %v", err)
-			continue
-		}
-
-		switch msg.Type {
-		case CommandInput:
-			// 处理终端输入
-			if data, ok := msg.Data.(string); ok {
-				_, err = ptmx.Write([]byte(data))
-				if err != nil {
-					log.Printf("Write error: %v", err)
-					break
-				}
-			}
-		case CommandResize:
-			// 处理窗口大小调整
-			if data, ok := msg.Data.(map[string]interface{}); ok {
-				cols, _ := data["cols"].(float64)
-				rows, _ := data["rows"].(float64)
-				pty.Setsize(ptmx, &pty.Winsize{
-					Rows: uint16(rows),
-					Cols: uint16(cols),
-				})
-			}
-		case CommandPing:
-			// 处理心跳请求
-			pongMsg, _ := json.Marshal(WebSocketMessage{
-				Type: "pong",
-				Data: time.Now().UnixNano() / int64(time.Millisecond),
-			})
-			conn.WriteMessage(websocket.TextMessage, pongMsg)
+			return
 		}
 	}
 }
