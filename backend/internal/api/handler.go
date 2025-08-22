@@ -99,43 +99,38 @@ func HandleFileUpload(w http.ResponseWriter, r *http.Request) {
 		targetPath = "./uploads"
 	}
 	
-	// 确保目标目录存在
+	// 创建目标目录（如果不存在）
 	if err := os.MkdirAll(targetPath, 0755); err != nil {
 		http.Error(w, "Unable to create target directory", http.StatusInternalServerError)
 		return
 	}
 	
 	// 创建目标文件
-	dst, err := os.Create(filepath.Join(targetPath, handler.Filename))
+	targetFile, err := os.Create(filepath.Join(targetPath, handler.Filename))
 	if err != nil {
 		http.Error(w, "Unable to create target file", http.StatusInternalServerError)
 		return
 	}
-	defer dst.Close()
+	defer targetFile.Close()
 	
-	// 复制文件内容
-	if _, err := io.Copy(dst, file); err != nil {
-		http.Error(w, "Unable to save file", http.StatusInternalServerError)
+	// 将上传的文件内容复制到目标文件
+	_, err = io.Copy(targetFile, file)
+	if err != nil {
+		http.Error(w, "Unable to save uploaded file", http.StatusInternalServerError)
 		return
 	}
 	
 	// 返回成功响应
-	response := map[string]interface{}{
+	response := map[string]string{
 		"message": "File uploaded successfully",
-		"file": map[string]interface{}{
-			"name": handler.Filename,
-			"size": handler.Size,
-			"path": filepath.Join(targetPath, handler.Filename),
-		},
+		"file":    handler.Filename,
 	}
-	
-	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
 
 // HandleFileDownload 处理文件下载请求
 func HandleFileDownload(w http.ResponseWriter, r *http.Request) {
-	// 获取要下载的文件路径
+	// 获取文件路径
 	filePath := r.URL.Query().Get("path")
 	if filePath == "" {
 		http.Error(w, "File path is required", http.StatusBadRequest)
@@ -149,31 +144,19 @@ func HandleFileDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	
 	// 设置响应头
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filepath.Base(filePath)))
+	w.Header().Set("Content-Disposition", "attachment; filename="+filepath.Base(filePath))
 	w.Header().Set("Content-Type", "application/octet-stream")
 	
-	// 读取并发送文件
+	// 读取并发送文件内容
 	http.ServeFile(w, r, filePath)
 }
 
 // HandleFileList 处理文件列表请求
 func HandleFileList(w http.ResponseWriter, r *http.Request) {
-	// 获取目录路径（默认为当前目录）
+	// 获取目录路径
 	dirPath := r.URL.Query().Get("path")
 	if dirPath == "" {
 		dirPath = "."
-	}
-	
-	// 检查目录是否存在
-	info, err := os.Stat(dirPath)
-	if os.IsNotExist(err) {
-		http.Error(w, "Directory not found", http.StatusNotFound)
-		return
-	}
-	
-	if !info.IsDir() {
-		http.Error(w, "Path is not a directory", http.StatusBadRequest)
-		return
 	}
 	
 	// 读取目录内容
@@ -185,89 +168,56 @@ func HandleFileList(w http.ResponseWriter, r *http.Request) {
 	
 	// 构造响应数据
 	var files []map[string]interface{}
-	
 	for _, entry := range entries {
-		fileInfo, err := entry.Info()
+		info, err := entry.Info()
 		if err != nil {
 			continue
 		}
 		
 		file := map[string]interface{}{
-			"name":     entry.Name(),
-			"type":     "file",
-			"size":     fileInfo.Size(),
-			"modified": fileInfo.ModTime().Format("2006-01-02 15:04:05"),
+			"name":    entry.Name(),
+			"is_dir":  entry.IsDir(),
+			"size":    info.Size(),
+			"mod_time": info.ModTime(),
+			"mode":    info.Mode().String(),
 		}
-		
-		if entry.IsDir() {
-			file["type"] = "directory"
-			file["size"] = 0
-		} else {
-			// 检查是否可执行
-			if fileInfo.Mode()&0111 != 0 {
-				file["executable"] = true
-			}
-		}
-		
-		// 获取文件权限
-		file["permissions"] = fileInfo.Mode().String()
-		
 		files = append(files, file)
 	}
 	
-	// 返回响应
+	// 返回JSON响应
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(files)
 }
 
 // HandleFileDelete 处理文件删除请求
 func HandleFileDelete(w http.ResponseWriter, r *http.Request) {
-	// 只允许DELETE方法
-	if r.Method != http.MethodDelete {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	
-	// 获取要删除的文件路径
+	// 获取文件路径
 	filePath := r.URL.Query().Get("path")
 	if filePath == "" {
 		http.Error(w, "File path is required", http.StatusBadRequest)
 		return
 	}
 	
-	// 检查文件是否存在
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		http.Error(w, "File not found", http.StatusNotFound)
-		return
-	}
-	
-	// 删除文件
-	if err := os.Remove(filePath); err != nil {
-		http.Error(w, "Unable to delete file", http.StatusInternalServerError)
+	// 删除文件或目录
+	err := os.RemoveAll(filePath)
+	if err != nil {
+		http.Error(w, "Unable to delete file or directory", http.StatusInternalServerError)
 		return
 	}
 	
 	// 返回成功响应
 	response := map[string]string{
-		"message": "File deleted successfully",
+		"message": "File or directory deleted successfully",
 	}
-	
-	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
 
 // HandleFilePermissions 处理文件权限修改请求
 func HandleFilePermissions(w http.ResponseWriter, r *http.Request) {
-	// 只允许PUT方法
-	if r.Method != http.MethodPut {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	
 	// 解析请求体
 	var requestData struct {
 		Path        string `json:"path"`
-		Permissions string `json:"permissions"`
+		Permissions string `json:"permissions"` // 八进制权限字符串，例如 "755"
 	}
 	
 	if err := json.NewDecoder(r.Body).Decode(&requestData); err != nil {
@@ -275,62 +225,35 @@ func HandleFilePermissions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	// 检查必需参数
+	// 检查必需字段
 	if requestData.Path == "" || requestData.Permissions == "" {
 		http.Error(w, "Path and permissions are required", http.StatusBadRequest)
 		return
 	}
 	
-	// 检查文件是否存在
-	if _, err := os.Stat(requestData.Path); os.IsNotExist(err) {
-		http.Error(w, "File not found", http.StatusNotFound)
-		return
-	}
-	
-	// 解析权限字符串（例如 "0755" 或 "rwxr-xr-x"）
-	var perm os.FileMode
-	if strings.HasPrefix(requestData.Permissions, "0") && len(requestData.Permissions) == 4 {
-		// 数字格式权限（如 "0755"）
-		permValue, err := strconv.ParseUint(requestData.Permissions, 8, 32)
-		if err != nil {
-			http.Error(w, "Invalid permissions format", http.StatusBadRequest)
-			return
-		}
-		perm = os.FileMode(permValue)
-	} else if len(requestData.Permissions) == 9 || len(requestData.Permissions) == 10 {
-		// 字符格式权限（如 "rwxr-xr-x"）
-		perm = parseSymbolicPermissions(requestData.Permissions)
-	} else {
+	// 解析权限字符串
+	permValue, err := strconv.ParseUint(requestData.Permissions, 8, 32)
+	if err != nil {
 		http.Error(w, "Invalid permissions format", http.StatusBadRequest)
 		return
 	}
 	
 	// 修改文件权限
-	if err := os.Chmod(requestData.Path, perm); err != nil {
+	err = os.Chmod(requestData.Path, os.FileMode(permValue))
+	if err != nil {
 		http.Error(w, "Unable to change file permissions", http.StatusInternalServerError)
 		return
 	}
 	
 	// 返回成功响应
-	response := map[string]interface{}{
-		"message":     "File permissions changed successfully",
-		"permissions": perm.String(),
+	response := map[string]string{
+		"message": "File permissions updated successfully",
 	}
-	
-	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
 
-
-
 // HandleFileMkdir 处理创建目录请求
 func HandleFileMkdir(w http.ResponseWriter, r *http.Request) {
-	// 只允许POST方法
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	
 	// 解析请求体
 	var requestData struct {
 		Path string `json:"path"`
@@ -341,14 +264,15 @@ func HandleFileMkdir(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	// 检查必需参数
+	// 检查必需字段
 	if requestData.Path == "" {
 		http.Error(w, "Path is required", http.StatusBadRequest)
 		return
 	}
 	
 	// 创建目录
-	if err := os.MkdirAll(requestData.Path, 0755); err != nil {
+	err := os.MkdirAll(requestData.Path, 0755)
+	if err != nil {
 		http.Error(w, "Unable to create directory", http.StatusInternalServerError)
 		return
 	}
@@ -357,23 +281,15 @@ func HandleFileMkdir(w http.ResponseWriter, r *http.Request) {
 	response := map[string]string{
 		"message": "Directory created successfully",
 	}
-	
-	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
 
 // HandleFileRename 处理文件重命名请求
 func HandleFileRename(w http.ResponseWriter, r *http.Request) {
-	// 只允许POST方法
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	
 	// 解析请求体
 	var requestData struct {
-		OldPath string `json:"oldPath"`
-		NewPath string `json:"newPath"`
+		OldPath string `json:"old_path"`
+		NewPath string `json:"new_path"`
 	}
 	
 	if err := json.NewDecoder(r.Body).Decode(&requestData); err != nil {
@@ -381,40 +297,27 @@ func HandleFileRename(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	// 检查必需参数
+	// 检查必需字段
 	if requestData.OldPath == "" || requestData.NewPath == "" {
 		http.Error(w, "Old path and new path are required", http.StatusBadRequest)
 		return
 	}
 	
-	// 检查源文件是否存在
-	if _, err := os.Stat(requestData.OldPath); os.IsNotExist(err) {
-		http.Error(w, "Source file not found", http.StatusNotFound)
-		return
-	}
-	
-	// 检查目标路径是否已存在
-	if _, err := os.Stat(requestData.NewPath); err == nil {
-		http.Error(w, "Destination already exists", http.StatusConflict)
-		return
-	}
-	
-	// 重命名文件
-	if err := os.Rename(requestData.OldPath, requestData.NewPath); err != nil {
-		http.Error(w, "Unable to rename file", http.StatusInternalServerError)
+	// 重命名文件或目录
+	err := os.Rename(requestData.OldPath, requestData.NewPath)
+	if err != nil {
+		http.Error(w, "Unable to rename file or directory", http.StatusInternalServerError)
 		return
 	}
 	
 	// 返回成功响应
 	response := map[string]string{
-		"message": "File renamed successfully",
+		"message": "File or directory renamed successfully",
 	}
-	
-	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
 
-// parseSymbolicPermissions 解析符号权限字符串（如 "rwxr-xr-x"）
+// parseSymbolicPermissions 解析符号权限字符串（例如 "rwxr-xr-x"）
 func parseSymbolicPermissions(permStr string) os.FileMode {
 	var perm os.FileMode
 	
@@ -467,7 +370,7 @@ func parseSymbolicPermissions(permStr string) os.FileMode {
 }
 
 // HandleLogin 处理用户登录请求
-func HandleLogin(w http.ResponseWriter, r *http.Request) {
+func HandleLogin(w http.ResponseWriter, r *http.Request, authService *services.AuthService) {
 	// 设置响应头
 	w.Header().Set("Content-Type", "application/json")
 	
@@ -483,32 +386,8 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	// 获取登录超时时间配置
-	timeoutStr := os.Getenv("AUTH_TIMEOUT")
-	timeout := 10
-	var err error
-	if timeoutStr != "" {
-		timeout, err = strconv.Atoi(timeoutStr)
-		if err != nil || timeout <= 0 {
-			timeout = 10 // 默认值
-		}
-	}
-	
-	// 获取环境变量中的管理员凭据
-	validUsername := os.Getenv("ADMIN_USERNAME")
-	validPassword := os.Getenv("ADMIN_PASSWORD")
-	
-	// 如果环境变量未设置，则使用默认值
-	if validUsername == "" {
-		validUsername = "admin"
-	}
-	
-	if validPassword == "" {
-		validPassword = "password"
-	}
-	
-	// 首先尝试使用默认凭据验证
-	if credentials.Username == validUsername && credentials.Password == validPassword {
+	// 使用认证服务验证用户凭据
+	if authService.AuthenticateUser(credentials.Username, credentials.Password) {
 		// 登录成功，返回token和用户信息
 		response := map[string]interface{}{
 			"token": fmt.Sprintf("token_%d", time.Now().Unix()),
@@ -521,187 +400,15 @@ func HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	// 如果默认凭据验证失败，尝试使用系统用户认证（如果启用）
-	if os.Getenv("ENABLE_SYSTEM_AUTH") == "true" {
-		// 检查用户是否存在
-		getentCmd := exec.Command("getent", "passwd", credentials.Username)
-		getentCmd.Stderr = os.Stderr // 将错误输出到日志
-		if err := getentCmd.Run(); err != nil {
-			// 用户不存在
-			log.Printf("User does not exist: %s", credentials.Username)
-			http.Error(w, "Invalid username or password", http.StatusUnauthorized)
-			return
-		}
-		
-		// 使用timeout命令限制执行时间，避免长时间挂起
-		// 在Rocky Linux等系统上增加额外的选项确保命令正确终止
-		cmd := exec.Command("timeout", "-k", "1", fmt.Sprintf("%d", timeout), "su", "-s", "/bin/sh", credentials.Username, "-c", "echo authenticated")
-		
-		// 创建管道用于传递密码
-		stdin, err := cmd.StdinPipe()
-		if err != nil {
-			log.Printf("Authentication error (stdin pipe): %v", err)
-			http.Error(w, "Authentication failed", http.StatusUnauthorized)
-			return
-		}
-		
-		// 捕获stdout
-		stdout, err := cmd.StdoutPipe()
-		if err != nil {
-			log.Printf("Authentication error (stdout pipe): %v", err)
-			http.Error(w, "Authentication failed", http.StatusUnauthorized)
-			return
-		}
-		
-		// 捕获stderr
-		stderr, err := cmd.StderrPipe()
-		if err != nil {
-			log.Printf("Authentication error (stderr pipe): %v", err)
-			http.Error(w, "Authentication failed", http.StatusUnauthorized)
-			return
-		}
-		
-		// 设置环境变量，防止子进程被挂起
-		cmd.Env = append(os.Environ(), "TERM=xterm")
-		
-		// 启动命令
-		if err := cmd.Start(); err != nil {
-			log.Printf("Authentication error (command start): %v", err)
-			http.Error(w, "Authentication failed", http.StatusUnauthorized)
-			return
-		}
-		
-		// 写入密码
-		if _, err := io.WriteString(stdin, credentials.Password+"\n"); err != nil {
-			log.Printf("Error writing password to stdin: %v", err)
-			// 关闭进程
-			if cmd.Process != nil {
-				cmd.Process.Kill()
-				cmd.Process.Wait()
-			}
-			http.Error(w, "Authentication failed", http.StatusUnauthorized)
-			return
-		}
-		stdin.Close()
-		
-		// 读取输出
-		var output, errOutput []byte
-		done := make(chan error, 1)
-		
-		// 使用WaitGroup来管理goroutines
-		var wg sync.WaitGroup
-		wg.Add(2)
-		
-		// 读取标准输出
-		go func() {
-			defer wg.Done()
-			var err error
-			output, err = io.ReadAll(stdout)
-			if err != nil && err != io.EOF {
-				log.Printf("Error reading stdout: %v", err)
-			}
-		}()
-		
-		// 读取错误输出
-		go func() {
-			defer wg.Done()
-			var err error
-			errOutput, err = io.ReadAll(stderr)
-			if err != nil && err != io.EOF {
-				log.Printf("Error reading stderr: %v", err)
-			}
-		}()
-		
-		wg.Wait()
-		
-		// 启动另一个goroutine等待命令执行完成
-		go func() {
-			done <- cmd.Wait()
-		}()
-		
-		// 添加超时处理
-		var cmdErr error
-		select {
-		case cmdErr = <-done:
-			// 命令正常完成
-			log.Printf("Authentication command completed with status: %v", cmdErr)
-		case <-time.After(time.Duration(timeout) * time.Second):
-			// 超时，强制终止命令
-			if cmd.Process != nil {
-				log.Printf("Killing authentication process due to timeout")
-				if err := cmd.Process.Kill(); err != nil {
-					log.Printf("Error killing process: %v", err)
-				}
-				// 等待进程完全终止
-				cmd.Process.Wait()
-			}
-			log.Printf("Authentication timed out after %d seconds", timeout)
-			http.Error(w, "Authentication failed: process timed out", http.StatusUnauthorized)
-			return
-		}
-		
-		// 检查输出和错误码
-		if cmdErr == nil && (strings.Contains(string(output), "authenticated") || strings.Contains(string(output), "Password")) {
-			// 登录成功，返回token和用户信息
-			response := map[string]interface{}{
-				"token": fmt.Sprintf("token_%d", time.Now().Unix()),
-				"user": map[string]string{
-					"username": credentials.Username,
-				},
-				"is_default_password": false,
-			}
-			json.NewEncoder(w).Encode(response)
-			return
-		}
-		
-		// 如果首次认证失败，尝试使用sshpass进行二次认证
-		if os.Getenv("ENABLE_SSH_AUTH") == "true" && strings.Contains(string(errOutput), "Authentication token manipulation error") {
-			log.Printf("Attempting secondary authentication via SSH for user: %s", credentials.Username)
-			
-			// 构建sshpass命令
-			sshCmd := exec.Command("timeout", "-k", "1", fmt.Sprintf("%d", timeout), "sshpass", "-p", credentials.Password, "ssh", 
-				"-o", "StrictHostKeyChecking=no", 
-				"-o", "BatchMode=yes", 
-				"-o", "ConnectTimeout=10", 
-				fmt.Sprintf("%s@localhost", credentials.Username), 
-				"echo authenticated")
-			
-			// 设置环境变量
-			sshCmd.Env = append(os.Environ(), "TERM=xterm")
-			
-			// 捕获输出
-			sshOutput, err := sshCmd.CombinedOutput()
-			if err == nil && strings.Contains(string(sshOutput), "authenticated") {
-				log.Printf("Secondary SSH authentication successful for user: %s", credentials.Username)
-				
-				// 返回成功响应
-				response := map[string]interface{}{
-					"token": fmt.Sprintf("token_%d", time.Now().Unix()),
-					"user": map[string]string{
-						"username": credentials.Username,
-					},
-					"is_default_password": false,
-				}
-				json.NewEncoder(w).Encode(response)
-				return
-			}
-			
-			log.Printf("Secondary SSH authentication failed: %s", sshOutput)
-		}
-	}
-	
 	// 登录失败
 	log.Printf("Authentication failed for user: %s", credentials.Username)
 	http.Error(w, "Invalid username or password", http.StatusUnauthorized)
 }
 
 // HandleChangePassword 处理修改密码请求
-func HandleChangePassword(w http.ResponseWriter, r *http.Request) {
+func HandleChangePassword(w http.ResponseWriter, r *http.Request, authService *services.AuthService) {
 	// 设置响应头
 	w.Header().Set("Content-Type", "application/json")
-	
-	// 这里应该验证用户身份和权限
-	// 为简化起见，我们只实现基本逻辑
 	
 	var requestData struct {
 		CurrentPassword string `json:"current_password"`
@@ -713,21 +420,15 @@ func HandleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	// 验证当前密码（实际项目中应该从数据库或配置中验证）
-	validPassword := os.Getenv("ADMIN_PASSWORD")
-	if validPassword == "" {
-		validPassword = "password"
-	}
+	// 获取当前用户（在实际应用中应该从token中获取）
+	// 这里为了简化，我们假设是admin用户
+	username := "admin"
 	
-	if requestData.CurrentPassword != validPassword {
-		http.Error(w, "Current password is incorrect", http.StatusUnauthorized)
+	// 使用认证服务修改密码
+	if err := authService.ChangePassword(username, requestData.CurrentPassword, requestData.NewPassword); err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
-	
-	// 在实际应用中，这里应该更新密码存储
-	// 例如更新数据库或配置文件
-	// 为了演示，我们将新密码保存到环境变量中（实际应用中应保存到安全存储中）
-	os.Setenv("ADMIN_PASSWORD", requestData.NewPassword)
 	
 	// 返回成功响应
 	response := map[string]string{
@@ -736,239 +437,242 @@ func HandleChangePassword(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-var upgrader = websocket.Upgrader{
-	// 允许跨域
-	CheckOrigin: func(r *http.Request) bool {
-		return true
-	},
-}
-
-// 消息类型常量
-const (
-	CommandInput   = "input"
-	CommandResize  = "resize"
-	CommandPing    = "ping"
-)
-
-// ResizeMessage 定义窗口大小调整消息结构
-type ResizeMessage struct {
-	Cols uint16 `json:"cols"`
-	Rows uint16 `json:"rows"`
-}
-
-// WebSocketMessage 定义WebSocket消息结构
-type WebSocketMessage struct {
-	Type string      `json:"type"`
-	Data interface{} `json:"data"`
-}
-
-// 定义会话结构体
+// TerminalSession 表示一个终端会话
 type TerminalSession struct {
 	ID        string
 	Conn      *websocket.Conn
 	PTY       *os.File
 	Cmd       *exec.Cmd
+	Username  string
+	Password  string
+	AuthState int
 	LastActive time.Time
-	Mutex      sync.Mutex
-	AuthState  TerminalAuthState
-	Username   string
-	Password   string
+	Mutex     sync.RWMutex
 }
 
-// 会话管理器
-type SessionManager struct {
+const (
+	AuthNone = iota
+	AuthPending
+	AuthSuccess
+)
+
+// TerminalSessionManager 管理所有终端会话
+type TerminalSessionManager struct {
 	Sessions map[string]*TerminalSession
 	Mutex    sync.RWMutex
 }
 
-// 创建新的会话管理器
-var sessionManager = &SessionManager{
+var sessionManager = &TerminalSessionManager{
 	Sessions: make(map[string]*TerminalSession),
 }
 
-// 会话超时时间（30分钟）
-const sessionTimeout = 30 * time.Minute
-
-// 启动会话清理器
-func init() {
-	go sessionCleaner()
-}
-
-// 定期清理过期会话
-func sessionCleaner() {
-	ticker := time.NewTicker(5 * time.Minute)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		sessionManager.Mutex.Lock()
-		now := time.Now()
-		for id, session := range sessionManager.Sessions {
-			session.Mutex.Lock()
-			if now.Sub(session.LastActive) > sessionTimeout {
-				log.Printf("Cleaning up inactive session: %s", id)
-				// 关闭会话
-				closeSession(session)
-				// 从管理器中删除
-				delete(sessionManager.Sessions, id)
-			}
-			session.Mutex.Unlock()
-		}
-		sessionManager.Mutex.Unlock()
-	}
-}
-
-// 关闭会话
+// closeSession 关闭会话并清理资源
 func closeSession(session *TerminalSession) {
-	if session.Conn != nil {
-		session.Conn.Close()
-	}
+	session.Mutex.Lock()
+	defer session.Mutex.Unlock()
+	
 	if session.PTY != nil {
 		session.PTY.Close()
 	}
+	
 	if session.Cmd != nil && session.Cmd.Process != nil {
 		session.Cmd.Process.Kill()
-		session.Cmd.Process.Wait()
 	}
 }
 
-// TerminalAuthState 表示终端认证状态
-type TerminalAuthState int
-
-const (
-	AuthNone TerminalAuthState = iota // 未认证
-	AuthPending                       // 等待认证
-	AuthSuccess                       // 认证成功
-)
-
 // HandleWebSocket 处理WebSocket连接
 func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
+	// 升级HTTP连接到WebSocket
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		http.Error(w, "Could not open websocket connection", http.StatusBadRequest)
+		log.Printf("WebSocket upgrade failed: %v", err)
 		return
 	}
-
-	// 创建会话ID
+	defer conn.Close()
+	
+	// 生成会话ID
 	sessionID := uuid.New().String()
-
-	// 创建并保存会话，初始状态为未认证
+	
+	// 创建新的终端会话
 	session := &TerminalSession{
 		ID:         sessionID,
 		Conn:       conn,
-		PTY:        nil,
-		Cmd:        nil,
-		LastActive: time.Now(),
 		AuthState:  AuthNone,
-		Username:   "",
-		Password:   "",
+		LastActive: time.Now(),
 	}
-
+	
+	// 添加会话到管理器
 	sessionManager.Mutex.Lock()
 	sessionManager.Sessions[sessionID] = session
 	sessionManager.Mutex.Unlock()
-
-	// 发送会话信息到客户端
-	welcomeMsg, _ := json.Marshal(WebSocketMessage{
-		Type: "output",
-		Data: fmt.Sprintf("\r\n欢迎使用终端！请输入服务器账户和密码进行登录。\r\n会话ID: %s\r\n\r\n请输入用户名: ", sessionID),
+	
+	// 发送欢迎消息
+	welcomeMsg, _ := json.Marshal(map[string]interface{}{
+		"type": "output",
+		"data": fmt.Sprintf("\r\n欢迎使用终端！请输入服务器账户和密码进行登录。\r\n会话ID: %s\r\n\r\n请输入用户名: ", sessionID),
 	})
 	conn.WriteMessage(websocket.TextMessage, welcomeMsg)
+	
+	// 监听WebSocket消息
+	for {
+		messageType, message, err := conn.ReadMessage()
+		if err != nil {
+			// 连接已关闭，清理会话
+			sessionManager.Mutex.Lock()
+			if s, exists := sessionManager.Sessions[sessionID]; exists {
+				closeSession(s)
+				delete(sessionManager.Sessions, sessionID)
+			}
+			sessionManager.Mutex.Unlock()
+			break
+		}
+		
+		// 只处理文本消息
+		if messageType != websocket.TextMessage {
+			continue
+		}
+		
+		// 解析消息
+		var msg struct {
+			Type string      `json:"type"`
+			Data interface{} `json:"data"`
+		}
+		
+		if err := json.Unmarshal(message, &msg); err != nil {
+			log.Printf("Error unmarshaling message: %v", err)
+			continue
+		}
+		
+		// 更新最后活动时间
+		session.Mutex.Lock()
+		session.LastActive = time.Now()
+		session.Mutex.Unlock()
+		
+		// 根据消息类型处理
+		switch msg.Type {
+		case "input":
+			// 处理用户输入
+			if data, ok := msg.Data.(string); ok {
+				switch session.AuthState {
+				case AuthNone:
+					// 获取用户名
+					session.Mutex.Lock()
+					session.Username = strings.TrimSpace(data)
+					session.AuthState = AuthPending
+					session.Mutex.Unlock()
+					
+					// 请求密码
+					passwordPrompt, _ := json.Marshal(map[string]interface{}{
+						"type": "output",
+						"data": "\r\n请输入密码: ",
+					})
+					conn.WriteMessage(websocket.TextMessage, passwordPrompt)
+					
+				case AuthPending:
+					// 获取密码
+					session.Mutex.Lock()
+					session.Password = strings.TrimSpace(data)
+					username := session.Username
+					password := session.Password
+					session.Mutex.Unlock()
+					
+					// 验证用户名和密码
+					processMsg, _ := json.Marshal(map[string]interface{}{
+						"type": "output",
+						"data": "\r\n正在验证用户凭据...\r\n",
+					})
+					conn.WriteMessage(websocket.TextMessage, processMsg)
+					
+					// 验证用户凭据
+					// 注意：这里应该使用实际的认证服务
+					if username == "admin" && password == "password" {
+						// 认证成功
+						sessionManager.Mutex.RLock()
+						if s, exists := sessionManager.Sessions[sessionID]; exists {
+							s.Mutex.Lock()
+							s.AuthState = AuthSuccess
+							s.Mutex.Unlock()
+							
+							// 启动PTY并处理输出
+							go startPTYAndHandleOutput(s)
+						}
+						sessionManager.Mutex.RUnlock()
+					} else {
+						// 认证失败
+						errorMsg, _ := json.Marshal(map[string]interface{}{
+							"type": "output",
+							"data": "\r\n认证失败: 用户名或密码错误\r\n请重新输入用户名: ",
+						})
+						conn.WriteMessage(websocket.TextMessage, errorMsg)
+						
+						// 重置认证状态
+						sessionManager.Mutex.RLock()
+						if s, exists := sessionManager.Sessions[sessionID]; exists {
+							s.Mutex.Lock()
+							s.AuthState = AuthNone
+							s.Username = ""
+							s.Password = ""
+							s.Mutex.Unlock()
+						}
+						sessionManager.Mutex.RUnlock()
+					}
+					
+				case AuthSuccess:
+					// 已认证，直接转发输入到PTY
+					sessionManager.Mutex.RLock()
+					if s, exists := sessionManager.Sessions[sessionID]; exists && s.PTY != nil {
+						_, err = s.PTY.Write([]byte(data))
+						if err != nil {
+							log.Printf("Write error: %v", err)
+						}
+					}
+					sessionManager.Mutex.RUnlock()
+				}
+			}
+			
+		case "resize":
+			// 处理窗口大小调整
+			if session.AuthState == AuthSuccess {
+				if data, ok := msg.Data.(map[string]interface{}); ok {
+					cols, _ := data["cols"].(float64)
+					rows, _ := data["rows"].(float64)
+					
+					sessionManager.Mutex.RLock()
+					if s, exists := sessionManager.Sessions[sessionID]; exists && s.PTY != nil {
+						pty.Setsize(s.PTY, &pty.Winsize{
+							Rows: uint16(rows),
+							Cols: uint16(cols),
+						})
+					}
+					sessionManager.Mutex.RUnlock()
+				}
+			}
+			
+		case "ping":
+			// 处理心跳请求
+			pongMsg, _ := json.Marshal(map[string]interface{}{
+				"type": "pong",
+				"data": time.Now().UnixNano() / int64(time.Millisecond),
+			})
+			conn.WriteMessage(websocket.TextMessage, pongMsg)
+		}
+	}
 }
 
 // 验证用户凭据
 func authenticateUser(username, password string) bool {
-	// 首先检查是否是管理员账户
-	adminUsername := os.Getenv("ADMIN_USERNAME")
-	adminPassword := os.Getenv("ADMIN_PASSWORD")
-	
-	// 如果环境变量未设置，则使用默认值
-	if adminUsername == "" {
-		adminUsername = "admin"
-	}
-	
-	if adminPassword == "" {
-		adminPassword = "password"
-	}
-	
-	// 检查是否是管理员账户
-	if username == adminUsername && password == adminPassword {
-		log.Printf("管理员账户登录成功: %s", username)
-		return true
-	}
-	
-	// 自定义验证逻辑
-	// 这里可以实现自定义的用户验证逻辑，例如查询数据库等
-	// 为了演示，我们添加一些硬编码的用户
-	validUsers := map[string]string{
-		"user1": "password1",
-		"user2": "password2",
-		"test":  "test",
-	}
-	
-	if storedPassword, exists := validUsers[username]; exists && storedPassword == password {
-		log.Printf("自定义用户登录成功: %s", username)
-		return true
-	}
-	
-	// 如果需要，可以保留系统用户认证作为备选
-	// 但在生产环境中应谨慎使用，确保安全性
-	if os.Getenv("ENABLE_SYSTEM_AUTH") == "true" {
-		// 检查用户是否存在
-		getentCmd := exec.Command("getent", "passwd", username)
-		if err := getentCmd.Run(); err != nil {
-			// 用户不存在
-			log.Printf("系统用户不存在: %s", username)
-			return false
-		}
-		
-		// 使用su命令验证密码
-		cmd := exec.Command("su", "-s", "/bin/sh", username, "-c", "echo authenticated")
-		
-		// 创建管道用于传递密码
-		stdin, err := cmd.StdinPipe()
-		if err != nil {
-			log.Printf("Authentication error: %v", err)
-			return false
-		}
-		
-		// 捕获stdout
-		stdout, err := cmd.StdoutPipe()
-		if err != nil {
-			log.Printf("Authentication error: %v", err)
-			return false
-		}
-		
-		// 启动命令
-		if err := cmd.Start(); err != nil {
-			log.Printf("Authentication error: %v", err)
-			return false
-		}
-		
-		// 写入密码
-		go func() {
-			defer stdin.Close()
-			io.WriteString(stdin, password+"\n")
-		}()
-		
-		// 读取输出
-		output, _ := io.ReadAll(stdout)
-		
-		// 等待命令执行完成
-		err = cmd.Wait()
-		
-		// 检查输出和错误码
-		if err == nil && strings.Contains(string(output), "authenticated") {
-			log.Printf("系统用户登录成功: %s", username)
-			return true
-		}
-	}
-	
-	log.Printf("用户验证失败: %s", username)
-	return false
+	// 简单的验证逻辑，实际项目中应该查询数据库或使用其他认证机制
+	return username == "admin" && password == "password"
 }
 
 // 启动PTY并处理输出的函数
 func startPTYAndHandleOutput(session *TerminalSession) {
+	// 发送登录成功消息
+	successMsg, _ := json.Marshal(map[string]interface{}{
+		"type": "output",
+		"data": fmt.Sprintf("\r\n登录成功! 欢迎 %s\r\n\r\n", session.Username),
+	})
+	
 	// 获取WebSocket连接
 	session.Mutex.Lock()
 	conn := session.Conn
@@ -979,11 +683,6 @@ func startPTYAndHandleOutput(session *TerminalSession) {
 		return
 	}
 	
-	// 发送登录成功消息
-	successMsg, _ := json.Marshal(WebSocketMessage{
-		Type: "output",
-		Data: fmt.Sprintf("\r\n登录成功! 欢迎 %s\r\n\r\n", session.Username),
-	})
 	conn.WriteMessage(websocket.TextMessage, successMsg)
 	
 	// 启动一个bash shell
@@ -993,9 +692,9 @@ func startPTYAndHandleOutput(session *TerminalSession) {
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
 		log.Printf("Error starting pty: %v", err)
-		errorMsg, _ := json.Marshal(WebSocketMessage{
-			Type: "output",
-			Data: fmt.Sprintf("\r\n启动终端失败: %v\r\n", err),
+		errorMsg, _ := json.Marshal(map[string]interface{}{
+			"type": "output",
+			"data": fmt.Sprintf("\r\n启动终端失败: %v\r\n", err),
 		})
 		conn.WriteMessage(websocket.TextMessage, errorMsg)
 		return
@@ -1012,7 +711,7 @@ func startPTYAndHandleOutput(session *TerminalSession) {
 		Rows: 30,
 		Cols: 120,
 	})
-	
+
 	// 处理PTY输出并转发到WebSocket
 	buf := make([]byte, 1024)
 	for {
@@ -1022,9 +721,9 @@ func startPTYAndHandleOutput(session *TerminalSession) {
 				log.Printf("Error reading from pty: %v", err)
 			}
 			// 发送EOF消息到前端
-			eofMsg, _ := json.Marshal(WebSocketMessage{
-				Type: "output",
-				Data: "\r\n会话已结束.\r\n",
+			eofMsg, _ := json.Marshal(map[string]interface{}{
+				"type": "output",
+				"data": "\r\n会话已结束.\r\n",
 			})
 			conn.WriteMessage(websocket.TextMessage, eofMsg)
 
@@ -1044,9 +743,9 @@ func startPTYAndHandleOutput(session *TerminalSession) {
 		session.Mutex.Unlock()
 		
 		// 将PTY输出转发到WebSocket
-		outputMsg, _ := json.Marshal(WebSocketMessage{
-			Type: "output",
-			Data: string(buf[:n]),
+		outputMsg, _ := json.Marshal(map[string]interface{}{
+			"type": "output",
+			"data": string(buf[:n]),
 		})
 		err = conn.WriteMessage(websocket.TextMessage, outputMsg)
 		if err != nil {
@@ -1063,3 +762,20 @@ func startPTYAndHandleOutput(session *TerminalSession) {
 		}
 	}
 }
+
+var upgrader = websocket.Upgrader{
+	// 允许跨域
+	CheckOrigin: func(r *http.Request) bool {
+		return true
+	},
+}
+
+// 消息类型常量
+const (
+	// CommandInput represents input command
+	CommandInput = "input"
+	// CommandResize represents resize command
+	CommandResize = "resize"
+	// CommandPing represents ping command
+	CommandPing = "ping"
+)

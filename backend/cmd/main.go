@@ -5,15 +5,26 @@ import (
 	"net/http"
 
 	"panel-tool/internal/api"
+	"panel-tool/internal/services"
 )
 
 func main() {
+	// 初始化认证服务
+	authService := services.NewAuthService()
+	
 	// 设置路由
 	http.HandleFunc("/api/management-node", api.HandleGetManagementNode)
 	http.HandleFunc("/api/compute-nodes", api.HandleGetComputeNodes)
 	http.HandleFunc("/api/slurm-jobs", api.HandleGetSlurmJobs)
-	http.HandleFunc("/api/login", api.HandleLogin)
-	http.HandleFunc("/api/change-password", api.HandleChangePassword)
+	
+	// 传递认证服务给登录处理函数
+	http.HandleFunc("/api/login", func(w http.ResponseWriter, r *http.Request) {
+		api.HandleLogin(w, r, authService)
+	})
+	
+	http.HandleFunc("/api/change-password", func(w http.ResponseWriter, r *http.Request) {
+		api.HandleChangePassword(w, r, authService)
+	})
 	
 	// 文件管理相关路由
 	http.HandleFunc("/api/file/upload", api.HandleFileUpload)
