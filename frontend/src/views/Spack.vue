@@ -104,9 +104,9 @@
                         :loading="loadingAvailablePackages"
                         loading-text="加载中..."
                         no-data-text="未找到可安装的软件包"
-                        :items-per-page="10"
+                        :items-per-page="-1"
+                        :hide-default-footer="true"
                         class="elevation-1"
-                        :menu-props="{ zIndex: 9999 }"
                       >
                         <template v-slot:item.actions="{ item }">
                           <v-btn
@@ -140,9 +140,9 @@
                         :loading="loadingInstalledPackages"
                         loading-text="加载中..."
                         no-data-text="未找到已安装的软件包"
-                        :items-per-page="10"
+                        :items-per-page="-1"
+                        :hide-default-footer="true"
                         class="elevation-1"
-                        :menu-props="{ zIndex: 9999 }"
                       >
                         <template v-slot:item.actions="{ item }">
                           <v-btn
