@@ -128,15 +128,8 @@ export default {
         localStorage.setItem('user', JSON.stringify(user))
         localStorage.setItem('lastActivity', Date.now().toString())
         
-        // 检查是否需要更改密码
-        if (response.data.is_default_password) {
-          localStorage.setItem('shouldChangePassword', 'true')
-          // 跳转到修改密码页面
-          router.push('/change-password')
-        } else {
-          // 跳转到主页面
-          router.push('/')
-        }
+        // 跳转到主页面
+        router.push('/')
         
         // 如果选择了"记住我"，设置更长的超时时间
         const timeout = rememberMe.value ? 7 * 24 * 60 * 60 * 1000 : 5 * 60 * 1000

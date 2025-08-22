@@ -220,7 +220,7 @@
 </template>
 
 <script>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onActivated, computed } from 'vue'
 import axios from 'axios'
 
 export default {
@@ -590,23 +590,34 @@ export default {
       loading,
       selected,
       currentPath,
+      isDragging,
       uploadDialog,
       fileToUpload,
       uploading,
       permissionsDialog,
       newPermissions,
       changingPermissions,
+      renameDialog,
+      newItemName,
+      renaming,
       formatFileSize,
       isExecutable,
       uploadFile,
       confirmUpload,
       downloadItem,
       deleteItem,
+      deleteSelected,
       enterDirectory,
       refreshFiles,
       changeDirectory,
+      navigateUp,
+      createNewFolder,
+      confirmRename,
       openPermissionsDialog,
-      confirmPermissionChange
+      confirmPermissionChange,
+      onDragOver,
+      onDrop,
+      onDragLeave
     }
   }
 }

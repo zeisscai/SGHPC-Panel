@@ -1,6 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import Overview from '../views/Overview.vue'
-import System from '../views/System.vue'
 import Terminal from '../views/Terminal.vue'
 import FileManagement from '../views/FileManagement.vue'
 import Login from '../views/Login.vue'
@@ -20,27 +19,22 @@ const routes = [
     meta: { requiresAuth: true }
   },
   {
-    path: '/system',
-    name: 'System',
-    component: System,
-    meta: { requiresAuth: true },
-    children: [
-      {
-        path: 'terminal',
-        name: 'Terminal',
-        component: Terminal
-      },
-      {
-        path: 'files',
-        name: 'FileManagement',
-        component: FileManagement
-      },
-      {
-        path: 'spack',
-        name: 'Spack',
-        component: Spack
-      }
-    ]
+    path: '/system/terminal',
+    name: 'Terminal',
+    component: Terminal,
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/system/files',
+    name: 'FileManagement',
+    component: FileManagement,
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/system/spack',
+    name: 'Spack',
+    component: Spack,
+    meta: { requiresAuth: true }
   }
 ]
 

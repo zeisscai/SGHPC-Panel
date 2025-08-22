@@ -158,7 +158,7 @@
 </template>
 
 <script>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onActivated, computed } from 'vue'
 import { fetchManagementNode, fetchComputeNodes, fetchSlurmJobs } from '../api/node'
 
 export default {

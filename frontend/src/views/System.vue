@@ -40,10 +40,8 @@ export default {
 <style scoped>
 .system {
   animation: fadeIn 0.5s ease-in;
-  min-height: 400px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  height: 100%;
+  padding: 0;
 }
 
 .loading-container, .error-container {
