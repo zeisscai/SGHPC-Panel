@@ -9,6 +9,12 @@
   >
     <v-list-item class="px-2 py-4">
       <v-list-item>
+        <template v-slot:prepend>
+          <!-- Logo显示区域预留 - 可在此处添加logo图片 -->
+          <div class="logo-container mr-3">
+            <!-- <v-img src="/logo.png" alt="SGHPC Logo" width="32" height="32"></v-img> -->
+          </div>
+        </template>
         <v-list-item-title class="text-h6 font-weight-bold">
           SGHPC Panel
         </v-list-item-title>
@@ -79,12 +85,12 @@
           <template v-slot:prepend>
             <v-icon size="small" class="submenu-icon">mdi-file-document-multiple</v-icon>
           </template>
-          <v-list-item-title v-if="!isRail">File Management</v-list-item-title>
+          <v-list-item-title v-if="!isRail">Files</v-list-item-title>
           <v-tooltip
             v-if="isRail"
             activator="parent"
             location="right"
-          >File Management</v-tooltip>
+          >Files</v-tooltip>
         </v-list-item>
         
         <v-list-item
@@ -103,6 +109,24 @@
             activator="parent"
             location="right"
           >Spack</v-tooltip>
+        </v-list-item>
+        
+        <v-list-item
+          link
+          to="/system/user"
+          :active="$route.path === '/system/user'"
+          class="submenu-item"
+          :ripple="false"
+        >
+          <template v-slot:prepend>
+            <v-icon size="small" class="submenu-icon">mdi-account-multiple</v-icon>
+          </template>
+          <v-list-item-title v-if="!isRail">User</v-list-item-title>
+          <v-tooltip
+            v-if="isRail"
+            activator="parent"
+            location="right"
+          >User</v-tooltip>
         </v-list-item>
       </v-list-group>
     </v-list>
@@ -216,5 +240,19 @@ export default {
 
 .list-group :deep(.v-list-group__items .v-list-item) {
   padding-inline-start: 16px !important;
+}
+
+.v-icon {
+  background-color: transparent !important;
+}
+
+/* Logo容器样式 - 为后续logo实现预留 */
+.logo-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  /* 可根据实际logo需求调整尺寸和样式 */
 }
 </style>

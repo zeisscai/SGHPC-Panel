@@ -4,6 +4,7 @@ import Terminal from '../views/Terminal.vue'
 import FileManagement from '../views/FileManagement.vue'
 import Login from '../views/Login.vue'
 import Spack from '../views/Spack.vue'
+import User from '../views/User.vue'
 
 const routes = [
   {
@@ -34,6 +35,12 @@ const routes = [
     path: '/system/spack',
     name: 'Spack',
     component: Spack,
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/system/user',
+    name: 'User',
+    component: User,
     meta: { requiresAuth: true }
   }
 ]

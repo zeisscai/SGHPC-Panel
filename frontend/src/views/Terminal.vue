@@ -252,7 +252,6 @@ export default {
 .terminal-toolbar {
   display: flex;
   padding: 12px;
-  background-color: #f5f5f5;
   border-bottom: 1px solid #ddd;
   align-items: center;
   justify-content: space-between;
@@ -278,5 +277,9 @@ export default {
   .terminal-toolbar > div {
     margin-bottom: 8px;
   }
+}
+
+.v-icon {
+  background-color: transparent !important;
 }
 </style>

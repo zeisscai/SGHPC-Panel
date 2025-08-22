@@ -753,4 +753,21 @@ export default {
 .v-data-table {
   margin-top: 16px;
 }
+
+/* 全局图标背景透明化 */
+.v-icon,
+.v-alert .v-icon,
+.v-alert__icon .v-icon,
+.v-alert .v-alert__icon,
+.v-btn .v-icon,
+i.v-icon {
+  background-color: transparent !important;
+  background: transparent !important;
+}
+
+/* 确保alert组件内的所有图标都透明 */
+.v-alert * .v-icon {
+  background-color: transparent !important;
+  background: transparent !important;
+}
 </style>

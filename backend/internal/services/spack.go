@@ -7,8 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 	"sync"
+	"time"
 
 	"panel-tool/internal/utils"
 )
@@ -58,6 +58,13 @@ type Package struct {
 type InstallationStatus struct {
 	Installing bool     `json:"installing"`
 	Log        []string `json:"log"`
+}
+
+// OSInfo 操作系统信息结构体
+type OSInfo struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+	ID      string `json:"id"`
 }
 
 // CheckSpackStatus 检查 Spack 安装状态（带缓存）
@@ -183,6 +190,244 @@ func (s *SpackService) clearInstallLog() {
 	s.installLog = make([]string, 0)
 }
 
+// detectOS 检测操作系统信息
+func (s *SpackService) detectOS() OSInfo {
+	osInfo := OSInfo{
+		Name:    "Unknown",
+		Version: "Unknown",
+		ID:      "unknown",
+	}
+	
+	// 尝试读取 /etc/os-release 文件
+	content, err := os.ReadFile("/etc/os-release")
+	if err != nil {
+		s.logger.Error(fmt.Sprintf("无法读取 /etc/os-release: %v", err))
+		return osInfo
+	}
+	
+	lines := strings.Split(string(content), "\n")
+	for _, line := range lines {
+		if strings.HasPrefix(line, "NAME=") {
+			osInfo.Name = strings.Trim(strings.TrimPrefix(line, "NAME="), `"`)
+		} else if strings.HasPrefix(line, "VERSION_ID=") {
+			osInfo.Version = strings.Trim(strings.TrimPrefix(line, "VERSION_ID="), `"`)
+		} else if strings.HasPrefix(line, "ID=") {
+			osInfo.ID = strings.Trim(strings.TrimPrefix(line, "ID="), `"`)
+		}
+	}
+	
+	s.logger.Info(fmt.Sprintf("检测到操作系统: %s %s (ID: %s)", osInfo.Name, osInfo.Version, osInfo.ID))
+	return osInfo
+}
+
+// getPackageManager 根据操作系统获取包管理器
+func (s *SpackService) getPackageManager(osInfo OSInfo) string {
+	// Rocky Linux 9.x 使用 dnf
+	if osInfo.ID == "rocky" {
+		majorVersion := strings.Split(osInfo.Version, ".")[0]
+		if majorVersion >= "9" {
+			return "dnf"
+		}
+		return "yum"
+	}
+	
+	// RHEL 8+ 使用 dnf
+	if osInfo.ID == "rhel" {
+		majorVersion := strings.Split(osInfo.Version, ".")[0]
+		if majorVersion >= "8" {
+			return "dnf"
+		}
+		return "yum"
+	}
+	
+	// CentOS 8+ 使用 dnf
+	if osInfo.ID == "centos" {
+		majorVersion := strings.Split(osInfo.Version, ".")[0]
+		if majorVersion >= "8" {
+			return "dnf"
+		}
+		return "yum"
+	}
+	
+	// Fedora 使用 dnf
+	if osInfo.ID == "fedora" {
+		return "dnf"
+	}
+	
+	// Ubuntu/Debian 使用 apt
+	if osInfo.ID == "ubuntu" || osInfo.ID == "debian" {
+		return "apt"
+	}
+	
+	// openEuler 使用 dnf
+	if osInfo.ID == "openeuler" {
+		return "dnf"
+	}
+	
+	// 默认使用 yum
+	return "yum"
+}
+
+// isCriticalDependency 判断是否为关键依赖
+func (s *SpackService) isCriticalDependency(dep string) bool {
+	criticalDeps := []string{
+		"python3",
+		"gcc",
+		"gcc-c++",
+		"build-essential", // Ubuntu/Debian 的编译工具包
+		"make",
+		"git",
+		"curl",
+		"wget",
+	}
+	
+	for _, critical := range criticalDeps {
+		if dep == critical {
+			return true
+		}
+	}
+	return false
+}
+
+// configureForRockyLinux 为 Rocky Linux 9.6 添加特定配置
+func (s *SpackService) configureForRockyLinux(osInfo OSInfo, spackDir string, logChan chan<- string) error {
+	// 只为 Rocky Linux 9.x 进行特定配置
+	if osInfo.ID != "rocky" || !strings.HasPrefix(osInfo.Version, "9") {
+		return nil
+	}
+	
+	if logChan != nil {
+		logChan <- "正在为 Rocky Linux 9.6 配置 Spack..."
+	}
+	s.addInstallLog("正在为 Rocky Linux 9.6 配置 Spack...")
+	
+	// 创建 Spack 配置目录
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("获取用户主目录失败: %v", err)
+	}
+	
+	spackConfigDir := filepath.Join(homeDir, ".spack")
+	if err := os.MkdirAll(spackConfigDir, 0755); err != nil {
+		return fmt.Errorf("创建 Spack 配置目录失败: %v", err)
+	}
+	
+	// 配置编译器
+	compilerConfig := `compilers:
+- compiler:
+    spec: gcc@11.4.1
+    paths:
+      cc: /usr/bin/gcc
+      cxx: /usr/bin/g++
+      f77: /usr/bin/gfortran
+      fc: /usr/bin/gfortran
+    flags: {}
+    operating_system: rocky9
+    target: x86_64
+    modules: []
+    environment: {}
+    extra_rpaths: []
+`
+	
+	compilerConfigPath := filepath.Join(spackConfigDir, "compilers.yaml")
+	if err := os.WriteFile(compilerConfigPath, []byte(compilerConfig), 0644); err != nil {
+		return fmt.Errorf("写入编译器配置失败: %v", err)
+	}
+	
+	// 配置包管理器偏好
+	packagesConfig := `packages:
+  all:
+    providers:
+      mpi: [openmpi, mpich]
+      blas: [openblas, netlib-lapack]
+      lapack: [openblas, netlib-lapack]
+    variants: +shared
+  cmake:
+    version: [3.20:]
+  python:
+    version: [3.9:]
+  gcc:
+    version: [11.4.1]
+    buildable: false
+    externals:
+    - spec: gcc@11.4.1
+      prefix: /usr
+  openssl:
+    buildable: false
+    externals:
+    - spec: openssl@1.1.1
+      prefix: /usr
+`
+	
+	packagesConfigPath := filepath.Join(spackConfigDir, "packages.yaml")
+	if err := os.WriteFile(packagesConfigPath, []byte(packagesConfig), 0644); err != nil {
+		return fmt.Errorf("写入包配置失败: %v", err)
+	}
+	
+	// 配置模块系统
+	modulesConfig := `modules:
+  default:
+    enable:
+      - tcl
+    tcl:
+      hash_length: 0
+      naming_scheme: '{name}/{version}'
+      all:
+        conflict:
+          - '{name}'
+        environment:
+          set:
+            '{name}_ROOT': '{prefix}'
+`
+	
+	modulesConfigPath := filepath.Join(spackConfigDir, "modules.yaml")
+	if err := os.WriteFile(modulesConfigPath, []byte(modulesConfig), 0644); err != nil {
+		return fmt.Errorf("写入模块配置失败: %v", err)
+	}
+	
+	// 配置缓存和构建设置
+	configConfig := `config:
+  install_tree: $spack/opt/spack
+  template_dirs:
+    - $spack/share/spack/templates
+  module_roots:
+    tcl: $spack/share/spack/modules
+  build_stage:
+    - $tempdir/$user/spack-stage
+    - ~/.spack/stage
+  source_cache: ~/.spack/cache
+  misc_cache: ~/.spack/cache
+  connect_timeout: 10
+  verify_ssl: true
+  suppress_gpg_warnings: false
+  install_missing_compilers: false
+  checksum: true
+  dirty: false
+  build_language: C
+  locks: true
+  ccache: false
+  concretizer: clingo
+  db_lock_timeout: 120
+  package_lock_timeout: null
+  shared_linking: 'rpath'
+  allow_sgid: true
+  binary_index_root: 'https://binaries.spack.io'
+`
+	
+	configConfigPath := filepath.Join(spackConfigDir, "config.yaml")
+	if err := os.WriteFile(configConfigPath, []byte(configConfig), 0644); err != nil {
+		return fmt.Errorf("写入配置文件失败: %v", err)
+	}
+	
+	if logChan != nil {
+		logChan <- "Rocky Linux 9.6 特定配置完成"
+	}
+	s.addInstallLog("Rocky Linux 9.6 特定配置完成")
+	s.logger.Info("Rocky Linux 9.6 特定配置完成")
+	
+	return nil
+}
+
 // InstallSpack 安装 Spack
 func (s *SpackService) InstallSpack(logChan chan<- string) error {
 	// 设置安装状态
@@ -228,6 +473,20 @@ func (s *SpackService) InstallSpack(logChan chan<- string) error {
 		return nil
 	}
 
+	// 检测操作系统
+	osInfo := s.detectOS()
+	packageManager := s.getPackageManager(osInfo)
+	
+	detectedMsg := fmt.Sprintf("检测到操作系统: %s %s (ID: %s)，使用包管理器: %s", osInfo.Name, osInfo.Version, osInfo.ID, packageManager)
+	if logChan != nil {
+		logChan <- detectedMsg
+		if osInfo.ID == "rocky" && strings.HasPrefix(osInfo.Version, "9") {
+			logChan <- "✓ 已识别为 Rocky Linux 9.x，将应用专门优化"
+		}
+	}
+	s.addInstallLog(detectedMsg)
+	s.logger.Info(detectedMsg)
+	
 	// 安装依赖
 	if logChan != nil {
 		logChan <- "正在安装依赖..."
@@ -235,22 +494,127 @@ func (s *SpackService) InstallSpack(logChan chan<- string) error {
 	s.addInstallLog("正在安装依赖...")
 	s.logger.Info("正在安装依赖")
 	
-	// 在 OpenEuler 24 上安装依赖
-	dependencies := []string{
-		"python3",
-		"gcc",
-		"gcc-c++",
-		"make",
-		"git",
-		"curl",
-		"wget",
-		"patch",
-		"bzip2",
-		"gzip",
-		"tar",
-		"xz",
+	// 根据不同操作系统定义依赖包
+	var dependencies []string
+	var installArgs []string
+	
+	switch packageManager {
+	case "dnf":
+		// Rocky Linux 9.6, RHEL 8+, CentOS 8+, Fedora 使用的依赖包
+		dependencies = []string{
+			"python3",
+			"python3-pip",
+			"gcc",
+			"gcc-c++",
+			"make",
+			"git",
+			"curl",
+			"wget",
+			"patch",
+			"bzip2",
+			"gzip",
+			"tar",
+			"xz",
+			"which",
+			"file",
+			"findutils",
+			"diffutils",
+			"hostname",
+			"openssl-devel",
+			"zlib-devel",
+			"bzip2-devel",
+			"readline-devel",
+			"sqlite-devel",
+			"libffi-devel",
+		}
+		installArgs = []string{"install", "-y"}
+	case "yum":
+		// 旧版本 RHEL/CentOS 使用的依赖包
+		dependencies = []string{
+			"python3",
+			"gcc",
+			"gcc-c++",
+			"make",
+			"git",
+			"curl",
+			"wget",
+			"patch",
+			"bzip2",
+			"gzip",
+			"tar",
+			"xz",
+			"which",
+			"file",
+			"findutils",
+			"diffutils",
+			"hostname",
+			"openssl-devel",
+			"zlib-devel",
+			"bzip2-devel",
+		}
+		installArgs = []string{"install", "-y"}
+	case "apt":
+		// Ubuntu/Debian 使用的依赖包
+		dependencies = []string{
+			"python3",
+			"python3-pip",
+			"build-essential",
+			"git",
+			"curl",
+			"wget",
+			"patch",
+			"bzip2",
+			"gzip",
+			"tar",
+			"xz-utils",
+			"file",
+			"findutils",
+			"hostname",
+			"libssl-dev",
+			"zlib1g-dev",
+			"libbz2-dev",
+			"libreadline-dev",
+			"libsqlite3-dev",
+			"libffi-dev",
+		}
+		installArgs = []string{"update", "&&", "apt", "install", "-y"}
+	default:
+		// 默认使用 yum 的依赖包
+		dependencies = []string{
+			"python3",
+			"gcc",
+			"gcc-c++",
+			"make",
+			"git",
+			"curl",
+			"wget",
+			"patch",
+			"bzip2",
+			"gzip",
+			"tar",
+			"xz",
+		}
+		installArgs = []string{"install", "-y"}
 	}
-
+	
+	// 对于 apt，先执行 update
+	if packageManager == "apt" {
+		if logChan != nil {
+			logChan <- "正在更新软件包列表..."
+		}
+		s.addInstallLog("正在更新软件包列表...")
+		cmd := exec.Command("apt", "update")
+		if err := cmd.Run(); err != nil {
+			if logChan != nil {
+				logChan <- fmt.Sprintf("更新软件包列表失败: %v", err)
+			}
+			s.addInstallLog(fmt.Sprintf("更新软件包列表失败: %v", err))
+			s.logger.Error(fmt.Sprintf("更新软件包列表失败: %v", err))
+			return fmt.Errorf("更新软件包列表失败: %v", err)
+		}
+		installArgs = []string{"install", "-y"}
+	}
+	
 	for _, dep := range dependencies {
 		if logChan != nil {
 			logChan <- fmt.Sprintf("正在安装依赖: %s", dep)
@@ -258,15 +622,49 @@ func (s *SpackService) InstallSpack(logChan chan<- string) error {
 		s.addInstallLog(fmt.Sprintf("正在安装依赖: %s", dep))
 		s.logger.Info(fmt.Sprintf("正在安装依赖: %s", dep))
 		
-		cmd := exec.Command("yum", "install", "-y", dep)
-		err := cmd.Run()
+		// 执行安装命令
+		installMsg := fmt.Sprintf("正在安装依赖: %s...", dep)
+		if logChan != nil {
+			logChan <- installMsg
+		}
+		s.addInstallLog(installMsg)
+		
+		args := append(installArgs, dep)
+		cmd := exec.Command(packageManager, args...)
+		output, err := cmd.CombinedOutput()
 		if err != nil {
-			if logChan != nil {
-				logChan <- fmt.Sprintf("安装依赖 %s 失败: %v", dep, err)
+			// 详细的错误信息
+			errorDetails := fmt.Sprintf("命令: %s %s\n错误: %v\n输出: %s", 
+				packageManager, strings.Join(args, " "), err, string(output))
+			errorMsg := fmt.Sprintf("安装依赖 %s 失败", dep)
+			
+			if s.isCriticalDependency(dep) {
+				// 关键依赖安装失败，返回错误
+				fullErrorMsg := fmt.Sprintf("❌ %s (关键依赖)\n%s", errorMsg, errorDetails)
+				if logChan != nil {
+					logChan <- fmt.Sprintf("❌ %s (关键依赖)", errorMsg)
+					logChan <- "详细错误信息已记录到日志"
+				}
+				s.addInstallLog(fullErrorMsg)
+				s.logger.Error(fullErrorMsg)
+				return fmt.Errorf("%s: %v", errorMsg, err)
+			} else {
+				// 非关键依赖安装失败，记录警告但继续
+				fullWarningMsg := fmt.Sprintf("⚠️  %s (非关键依赖)\n%s", errorMsg, errorDetails)
+				if logChan != nil {
+					logChan <- fmt.Sprintf("⚠️  %s (非关键依赖，继续安装)", errorMsg)
+				}
+				s.addInstallLog(fullWarningMsg)
+				s.logger.Error(fullWarningMsg)
+				continue
 			}
-			s.addInstallLog(fmt.Sprintf("安装依赖 %s 失败: %v", dep, err))
-			s.logger.Error(fmt.Sprintf("安装依赖 %s 失败: %v", dep, err))
-			return fmt.Errorf("安装依赖 %s 失败: %v", dep, err)
+		} else {
+			successMsg := fmt.Sprintf("✓ 成功安装依赖: %s", dep)
+			if logChan != nil {
+				logChan <- successMsg
+			}
+			s.addInstallLog(successMsg)
+			s.logger.Info(successMsg)
 		}
 	}
 
@@ -323,33 +721,44 @@ func (s *SpackService) InstallSpack(logChan chan<- string) error {
 	}
 	
 	// 克隆 Spack 仓库
-	cmd := exec.Command("git", "clone", "https://github.com/spack/spack.git", spackDir)
+	downloadMsg := "正在从 GitHub 下载 Spack 源码..."
+	if logChan != nil {
+		logChan <- downloadMsg
+	}
+	s.addInstallLog(downloadMsg)
+	s.logger.Info("开始下载 Spack")
+	
+	cmd := exec.Command("git", "clone", "--depth", "1", "https://github.com/spack/spack.git", spackDir)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		errorDetails := fmt.Sprintf("创建 stdout pipe 失败: %v", err)
 		if logChan != nil {
-			logChan <- fmt.Sprintf("创建 stdout pipe 失败: %v", err)
+			logChan <- fmt.Sprintf("❌ %s", errorDetails)
 		}
-		s.addInstallLog(fmt.Sprintf("创建 stdout pipe 失败: %v", err))
-		s.logger.Error(fmt.Sprintf("创建 stdout pipe 失败: %v", err))
+		s.addInstallLog(errorDetails)
+		s.logger.Error(errorDetails)
 		return err
 	}
 	
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
+		errorDetails := fmt.Sprintf("创建 stderr pipe 失败: %v", err)
 		if logChan != nil {
-			logChan <- fmt.Sprintf("创建 stderr pipe 失败: %v", err)
+			logChan <- fmt.Sprintf("❌ %s", errorDetails)
 		}
-		s.addInstallLog(fmt.Sprintf("创建 stderr pipe 失败: %v", err))
-		s.logger.Error(fmt.Sprintf("创建 stderr pipe 失败: %v", err))
+		s.addInstallLog(errorDetails)
+		s.logger.Error(errorDetails)
 		return err
 	}
 	
 	if err := cmd.Start(); err != nil {
+		errorDetails := fmt.Sprintf("启动 git clone 命令失败: %v", err)
 		if logChan != nil {
-			logChan <- fmt.Sprintf("启动 git clone 命令失败: %v", err)
+			logChan <- fmt.Sprintf("❌ %s", errorDetails)
+			logChan <- "请检查网络连接和 Git 是否已安装"
 		}
-		s.addInstallLog(fmt.Sprintf("启动 git clone 命令失败: %v", err))
-		s.logger.Error(fmt.Sprintf("启动 git clone 命令失败: %v", err))
+		s.addInstallLog(errorDetails)
+		s.logger.Error(errorDetails)
 		return err
 	}
 	
@@ -378,13 +787,28 @@ func (s *SpackService) InstallSpack(logChan chan<- string) error {
 	}()
 	
 	if err := cmd.Wait(); err != nil {
+		errorDetails := fmt.Sprintf("命令: git clone --depth 1 https://github.com/spack/spack.git %s\n错误: %v", spackDir, err)
+		errorMsg := "克隆 Spack 仓库失败"
+		fullErrorMsg := fmt.Sprintf("❌ %s\n%s", errorMsg, errorDetails)
+		
 		if logChan != nil {
-			logChan <- fmt.Sprintf("克隆 Spack 仓库失败: %v", err)
+			logChan <- fmt.Sprintf("❌ %s", errorMsg)
+			logChan <- "请检查网络连接和 Git 是否已安装"
 		}
-		s.addInstallLog(fmt.Sprintf("克隆 Spack 仓库失败: %v", err))
-		s.logger.Error(fmt.Sprintf("克隆 Spack 仓库失败: %v", err))
-		return err
+		s.addInstallLog(fullErrorMsg)
+		s.logger.Error(fullErrorMsg)
+		return fmt.Errorf("%s: %v", errorMsg, err)
 	}
+	
+	successMsg := "✓ Spack 源码下载完成"
+	if logChan != nil {
+		logChan <- successMsg
+		if osInfo.ID == "rocky" && strings.HasPrefix(osInfo.Version, "9") {
+			logChan <- "正在应用 Rocky Linux 9.6 专用配置..."
+		}
+	}
+	s.addInstallLog(successMsg)
+	s.logger.Info("Spack 下载完成")
 
 	// 检出特定版本 (1.0.0)
 	if logChan != nil {
@@ -423,7 +847,27 @@ func (s *SpackService) InstallSpack(logChan chan<- string) error {
 	bashrcPath := filepath.Join(homeDir, ".bashrc")
 	setupEnvPath := filepath.Join(spackDir, "share", "spack", "setup-env.sh")
 	if _, err := os.Stat(setupEnvPath); err == nil {
-		lineToAdd := fmt.Sprintf("\n# Spack 安装配置\nexport SPACK_ROOT=%s\nsource $SPACK_ROOT/share/spack/setup-env.sh\n", spackDir)
+		// 为 Rocky Linux 9.6 优化环境变量配置
+		var lineToAdd string
+		if osInfo.ID == "rocky" && strings.HasPrefix(osInfo.Version, "9") {
+			lineToAdd = fmt.Sprintf(`
+# Spack 安装配置 (Rocky Linux 9.6 优化)
+export SPACK_ROOT=%s
+export PATH=$SPACK_ROOT/bin:$PATH
+# Rocky Linux 9.6 特定优化
+export SPACK_PYTHON=/usr/bin/python3
+export SPACK_DISABLE_LOCAL_CONFIG=false
+export TMPDIR=/tmp
+export SPACK_USER_CACHE_PATH=$HOME/.spack
+# 启用并行构建
+export SPACK_BUILD_JOBS=$(nproc)
+# 设置编译器缓存
+export SPACK_CCACHE_DIR=$HOME/.spack/ccache
+source $SPACK_ROOT/share/spack/setup-env.sh
+`, spackDir)
+		} else {
+			lineToAdd = fmt.Sprintf("\n# Spack 安装配置\nexport SPACK_ROOT=%s\nsource $SPACK_ROOT/share/spack/setup-env.sh\n", spackDir)
+		}
 		
 		// 检查是否已经添加过
 		alreadyAdded := false
@@ -460,12 +904,25 @@ func (s *SpackService) InstallSpack(logChan chan<- string) error {
 		}
 	}
 
+	// 为 Rocky Linux 9.6 添加特定配置
+	if err := s.configureForRockyLinux(osInfo, spackDir, logChan); err != nil {
+		if logChan != nil {
+			logChan <- fmt.Sprintf("警告: Rocky Linux 特定配置失败: %v", err)
+		}
+		s.addInstallLog(fmt.Sprintf("警告: Rocky Linux 特定配置失败: %v", err))
+		s.logger.Error(fmt.Sprintf("Rocky Linux 特定配置失败: %v", err))
+		// 不返回错误，因为这不是关键步骤
+	}
+	
 	// 添加提示信息，告知用户如何使用 Spack
 	if logChan != nil {
 		logChan <- "Spack 安装完成!"
 		logChan <- "环境变量已自动配置并激活"
 		logChan <- "如遇到命令未找到问题，请重新登录或执行以下命令:"
 		logChan <- "  source ~/.bashrc"
+		if osInfo.ID == "rocky" && strings.HasPrefix(osInfo.Version, "9") {
+			logChan <- "已为 Rocky Linux 9.6 优化配置"
+		}
 	}
 	
 	s.addInstallLog("Spack 安装完成!")

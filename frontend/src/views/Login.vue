@@ -262,4 +262,8 @@ export default {
     padding: 24px !important;
   }
 }
+
+.v-icon {
+  background-color: transparent !important;
+}
 </style>

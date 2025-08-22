@@ -5,7 +5,7 @@
         <v-card class="mb-6" elevation="4">
           <v-card-title class="text-h4 font-weight-bold">
             <v-icon left class="mr-2 file-icon">mdi-file-document-multiple</v-icon>
-            File Management
+            Files
           </v-card-title>
         </v-card>
       </v-col>
@@ -643,6 +643,10 @@ export default {
 }
 
 .file-icon {
+  background-color: transparent !important;
+}
+
+.v-icon {
   background-color: transparent !important;
 }
 </style>
