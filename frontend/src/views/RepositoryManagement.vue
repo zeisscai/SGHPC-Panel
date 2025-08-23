@@ -5,46 +5,11 @@
         <v-card elevation="2">
           <v-card-title>
             <v-icon left style="background: transparent;">mdi-package-variant</v-icon>
-            软件源管理
+            Repository
           </v-card-title>
           
           <v-card-text>
-            <!-- 当前状态显示 -->
-            <v-row class="mb-4">
-              <v-col cols="12">
-                <v-card outlined>
-                  <v-card-subtitle>当前软件源状态</v-card-subtitle>
-                  <v-card-text>
-                    <v-row>
-                      <v-col cols="12" md="6">
-                        <v-chip
-                          :color="currentRepoType === 'default' ? 'primary' : 'secondary'"
-                          label
-                          class="mb-2"
-                        >
-                          <v-icon left style="background: transparent;">mdi-source-repository</v-icon>
-                          {{ currentRepoType === 'default' ? '默认软件源' : '中科大镜像源' }}
-                        </v-chip>
-                        <div class="text-caption mt-1">
-                          {{ currentRepoUrl }}
-                        </div>
-                      </v-col>
-                      <v-col cols="12" md="6">
-                        <v-chip
-                          :color="repoStatus === 'accessible' ? 'success' : repoStatus === 'checking' ? 'warning' : 'error'"
-                          label
-                        >
-                          <v-icon left style="background: transparent;">
-                            {{ repoStatus === 'accessible' ? 'mdi-check-circle' : repoStatus === 'checking' ? 'mdi-loading mdi-spin' : 'mdi-alert-circle' }}
-                          </v-icon>
-                          {{ repoStatus === 'accessible' ? '可访问' : repoStatus === 'checking' ? '检查中' : '不可访问' }}
-                        </v-chip>
-                      </v-col>
-                    </v-row>
-                  </v-card-text>
-                </v-card>
-              </v-col>
-            </v-row>
+
 
             <!-- 操作按钮区域 -->
             <v-row class="mb-4">
@@ -59,17 +24,7 @@
                   清理缓存
                 </v-btn>
               </v-col>
-              <v-col cols="12" md="3">
-                <v-btn
-                  color="secondary"
-                  block
-                  :loading="switchingRepo"
-                  @click="switchRepository"
-                >
-                  <v-icon left style="background: transparent;">mdi-swap-horizontal</v-icon>
-                  切换软件源
-                </v-btn>
-              </v-col>
+
               <v-col cols="12" md="3">
                 <v-btn
                   color="info"
@@ -83,24 +38,7 @@
 
             </v-row>
 
-            <!-- 操作日志 -->
-            <v-row>
-              <v-col cols="12">
-                <v-card outlined>
-                  <v-card-subtitle>操作日志</v-card-subtitle>
-                  <v-card-text>
-                    <v-textarea
-                      v-model="operationLog"
-                      readonly
-                      outlined
-                      rows="8"
-                      placeholder="操作日志将在此显示..."
-                      class="monospace-font"
-                    ></v-textarea>
-                  </v-card-text>
-                </v-card>
-              </v-col>
-            </v-row>
+
           </v-card-text>
         </v-card>
       </v-col>
@@ -181,22 +119,14 @@
 import { ref, onMounted } from 'vue'
 import {
   cleanRepositoryCache,
-  switchRepository,
   setCustomRepository
 } from '../api/repository'
 
 export default {
   name: 'RepositoryManagement',
   setup() {
-    // 响应式数据
-    const currentRepoType = ref('default')
-    const currentRepoUrl = ref('')
-    const repoStatus = ref('checking')
-    const operationLog = ref('')
-    
     // 加载状态
     const cleaningCache = ref(false)
-    const switchingRepo = ref(false)
     const applyingCustomRepo = ref(false)
     
     // 对话框状态
@@ -220,17 +150,10 @@ export default {
       }
     }
     
-    // 添加日志
-    const addLog = (message) => {
-      const timestamp = new Date().toLocaleString()
-      operationLog.value += `[${timestamp}] ${message}\n`
-    }
-    
     // 显示成功消息
     const showSuccess = (message) => {
       successMessage.value = message
       showSuccessMessage.value = true
-      addLog(`✓ ${message}`)
     }
     
 
@@ -248,53 +171,27 @@ export default {
     // 清理缓存
     const cleanCache = async () => {
       cleaningCache.value = true
-      addLog('开始清理软件包缓存...')
       
       try {
         const response = await cleanRepositoryCache()
         if (response.success) {
           showSuccess('缓存清理完成')
-        } else {
-          addLog(`✗ ${response.message || '缓存清理失败'}`)
         }
       } catch (error) {
-        addLog(`✗ 缓存清理失败：${error.message}`)
+        // 静默处理错误
       } finally {
         cleaningCache.value = false
       }
     }
     
-    // 切换软件源
-    const switchRepository = async () => {
-      switchingRepo.value = true
-      const targetType = currentRepoType.value === 'default' ? 'ustc' : 'default'
-      addLog(`正在切换到${targetType === 'default' ? '默认' : '中科大镜像'}软件源...`)
-      
-      try {
-        const response = await switchRepository(targetType)
-        if (response.success) {
-          showSuccess('软件源切换成功')
-        } else {
-          addLog(`✗ ${response.message || '软件源切换失败'}`)
-        }
-      } catch (error) {
-        addLog(`✗ 软件源切换失败：${error.message}`)
-      } finally {
-        switchingRepo.value = false
-      }
-    }
-    
-
     
     // 应用自定义软件源
     const applyCustomRepository = async () => {
       if (!isValidUrl(customRepoUrl.value)) {
-        addLog('✗ 请输入有效的URL')
         return
       }
       
       applyingCustomRepo.value = true
-      addLog(`正在应用自定义软件源：${customRepoUrl.value}`)
       
       try {
         const response = await setCustomRepository(customRepoUrl.value)
@@ -302,11 +199,9 @@ export default {
           showSuccess('自定义软件源应用成功')
           showEditDialog.value = false
           customRepoUrl.value = ''
-        } else {
-          addLog(`✗ ${response.message || '自定义软件源应用失败'}`)
         }
       } catch (error) {
-        addLog(`✗ 自定义软件源应用失败：${error.message}`)
+        // 静默处理错误
       } finally {
         applyingCustomRepo.value = false
       }
@@ -321,15 +216,8 @@ export default {
 
     
     return {
-      // 数据
-      currentRepoType,
-      currentRepoUrl,
-      repoStatus,
-      operationLog,
-      
       // 加载状态
       cleaningCache,
-      switchingRepo,
       applyingCustomRepo,
       
       // 对话框
@@ -345,7 +233,6 @@ export default {
       
       // 方法
       cleanCache,
-      switchRepository,
       applyCustomRepository,
       cancelEdit,
       isValidUrl
