@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"os/exec"
 	"os/user"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -129,13 +129,29 @@ func HandleDeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	// 防止删除系统关键用户
-	if isSystemUser(username) {
+	// 防止删除系统关键用户 - 先获取用户信息
+	log.Printf("[USER API] Checking if user %s can be deleted...", username)
+	userInfo, err := user.Lookup(username)
+	if err != nil {
+		log.Printf("[USER API] User %s not found: %v", username, err)
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
+	
+	uid, err := strconv.Atoi(userInfo.Uid)
+	if err != nil {
+		log.Printf("[USER API] Failed to parse UID for user %s: %v", username, err)
+		http.Error(w, "Invalid user UID", http.StatusInternalServerError)
+		return
+	}
+	
+	if isSystemUser(username, uid) {
+		log.Printf("[USER API] Cannot delete system user %s (UID: %d)", username, uid)
 		http.Error(w, "Cannot delete system user", http.StatusForbidden)
 		return
 	}
 	
-	err := deleteSystemUser(username)
+	err = deleteSystemUser(username)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to delete user: %v", err), http.StatusInternalServerError)
 		return
@@ -234,174 +250,42 @@ func HandleGenerateSSHKey(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-// getSystemUsers 获取系统用户列表（过滤系统用户）
+// getSystemUsers 获取系统用户列表 (Rocky Linux 9.6)
 func getSystemUsers() ([]UserInfo, error) {
-	log.Printf("[USER API] Detecting operating system: %s", runtime.GOOS)
-	
-	if runtime.GOOS == "darwin" {
-		// macOS系统
-		return getMacOSUsers()
-	} else {
-		// Linux系统
-		return getLinuxUsers()
-	}
+	log.Printf("[USER API] Getting system users on Rocky Linux")
+	return getLinuxUsers()
 }
 
-// getLinuxUsers 获取Linux系统用户
+// getLinuxUsers 获取Rocky Linux用户
 func getLinuxUsers() ([]UserInfo, error) {
-	log.Printf("[USER API] Executing 'getent passwd' command for Linux...")
+	log.Printf("[USER API] Executing getent passwd command on Rocky Linux...")
 	cmd := exec.Command("getent", "passwd")
 	output, err := cmd.Output()
 	if err != nil {
-		log.Printf("[USER API] Failed to execute 'getent passwd': %v", err)
-		// 尝试备用方法：直接读取/etc/passwd文件
-		log.Printf("[USER API] Trying fallback method: reading /etc/passwd...")
-		cmd = exec.Command("cat", "/etc/passwd")
-		output, err = cmd.Output()
+		log.Printf("[USER API] getent passwd failed: %v, trying to read /etc/passwd", err)
+		// 如果getent失败，尝试直接读取/etc/passwd
+		output, err = os.ReadFile("/etc/passwd")
 		if err != nil {
-			log.Printf("[USER API] Fallback method also failed: %v", err)
-			return nil, fmt.Errorf("failed to get user information: %v", err)
+			log.Printf("[USER API] Failed to read /etc/passwd: %v", err)
+			return nil, fmt.Errorf("failed to get user list on Rocky Linux: %v", err)
 		}
+		log.Printf("[USER API] Successfully read /etc/passwd as fallback")
 	}
 	
-	return parsePasswdOutput(output)
-}
-
-// getMacOSUsers 获取macOS系统用户
-func getMacOSUsers() ([]UserInfo, error) {
-	log.Printf("[USER API] Getting macOS users using dscl...")
-	cmd := exec.Command("dscl", ".", "list", "/Users")
-	output, err := cmd.Output()
+	log.Printf("[USER API] Parsing passwd output...")
+	users, err := parsePasswdOutput(output)
 	if err != nil {
-		log.Printf("[USER API] Failed to execute dscl command: %v", err)
-		return nil, fmt.Errorf("failed to get macOS users: %v", err)
+		return nil, err
 	}
-	
-	usernames := strings.Split(strings.TrimSpace(string(output)), "\n")
-	var users []UserInfo
-	
-	for _, username := range usernames {
-		username = strings.TrimSpace(username)
-		if username == "" {
-			continue
-		}
-		
-		// 获取用户详细信息
-		userInfo, err := getMacOSUserInfo(username)
-		if err != nil {
-			log.Printf("[USER API] Failed to get info for user %s: %v", username, err)
-			continue
-		}
-		
-		// 过滤系统用户（UID < 500 在macOS中）
-		if userInfo.UID < 500 || isMacOSSystemUser(username) {
-			log.Printf("[USER API] Skipping macOS system user %s (UID: %d)", username, userInfo.UID)
-			continue
-		}
-		
-		log.Printf("[USER API] Adding macOS user: %s (UID: %d)", username, userInfo.UID)
-		users = append(users, *userInfo)
-	}
-	
-	log.Printf("[USER API] Found %d non-system macOS users", len(users))
+	log.Printf("[USER API] Found %d non-system users on Rocky Linux", len(users))
 	return users, nil
 }
 
-// getMacOSUserInfo 获取macOS用户详细信息
-func getMacOSUserInfo(username string) (*UserInfo, error) {
-	// 获取UID
-	cmd := exec.Command("dscl", ".", "read", "/Users/"+username, "UniqueID")
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, err
-	}
-	uidStr := strings.TrimSpace(strings.Replace(string(output), "UniqueID:", "", 1))
-	uid, err := strconv.Atoi(strings.TrimSpace(uidStr))
-	if err != nil {
-		return nil, err
-	}
-	
-	// 获取GID
-	cmd = exec.Command("dscl", ".", "read", "/Users/"+username, "PrimaryGroupID")
-	output, err = cmd.Output()
-	if err != nil {
-		return nil, err
-	}
-	gidStr := strings.TrimSpace(strings.Replace(string(output), "PrimaryGroupID:", "", 1))
-	gid, err := strconv.Atoi(strings.TrimSpace(gidStr))
-	if err != nil {
-		return nil, err
-	}
-	
-	// 获取Home目录
-	cmd = exec.Command("dscl", ".", "read", "/Users/"+username, "NFSHomeDirectory")
-	output, err = cmd.Output()
-	homeDir := "/Users/" + username // 默认值
-	if err == nil {
-		homeDirStr := strings.TrimSpace(strings.Replace(string(output), "NFSHomeDirectory:", "", 1))
-		if strings.TrimSpace(homeDirStr) != "" {
-			homeDir = strings.TrimSpace(homeDirStr)
-		}
-	}
-	
-	// 获取Shell
-	cmd = exec.Command("dscl", ".", "read", "/Users/"+username, "UserShell")
-	output, err = cmd.Output()
-	shell := "/bin/bash" // 默认值
-	if err == nil {
-		shellStr := strings.TrimSpace(strings.Replace(string(output), "UserShell:", "", 1))
-		if strings.TrimSpace(shellStr) != "" {
-			shell = strings.TrimSpace(shellStr)
-		}
-	}
-	
-	// 获取组名
-	groupName, _ := getGroupName(gid)
-	if groupName == "" {
-		groupName = fmt.Sprintf("gid_%d", gid)
-	}
-	
-	return &UserInfo{
-		Username: username,
-		UID:      uid,
-		GID:      gid,
-		Group:    groupName,
-		HomeDir:  homeDir,
-		Shell:    shell,
-	}, nil
-}
 
-// isMacOSSystemUser 检查是否为macOS系统用户
-func isMacOSSystemUser(username string) bool {
-	macOSSystemUsers := []string{
-		"daemon", "_amavisd", "_appleevents", "_applepay", "_appowner",
-		"_ard", "_assetcache", "_astris", "_atsserver", "_avbdeviced",
-		"_calendar", "_ces", "_clamav", "_coreaudiod", "_coremedia",
-		"_coreml", "_ctkd", "_cvmsroot", "_cvs", "_cyrus", "_devicemgr",
-		"_displaypolicyd", "_distnote", "_dovecot", "_dovenull",
-		"_dpaudio", "_eppc", "_findmydevice", "_fpsd", "_ftp", "_gamecontrollerd",
-		"_hidd", "_iconservices", "_installassistant", "_installer",
-		"_jabber", "_kadmin_admin", "_kadmin_changepw", "_krb_anonymous",
-		"_krb_changepw", "_krb_kadmin", "_krb_kerberos", "_krb_krbtgt",
-		"_krbfast", "_krbtgt", "_launchservicesd", "_lda", "_locationd",
-		"_logd", "_lp", "_mailman", "_mbsetupuser", "_mcxalr", "_mdnsresponder",
-		"_mysql", "_netbios", "_netstatistics", "_networkd", "_nsurlsessiond",
-		"_nsurlstoraged", "_oahd", "_ondemand", "_postfix", "_postgres",
-		"_qtss", "_sandbox", "_screensaver", "_scsd", "_securityagent",
-		"_serialnumberd", "_softwareupdate", "_spotlight", "_sshd",
-		"_svn", "_taskgated", "_teamsserver", "_timezone", "_tokend",
-		"_trustevaluationagent", "_unknown", "_update_sharing", "_usbmuxd",
-		"_uucp", "_warmd", "_webauthserver", "_windowserver", "_www",
-		"_wwwproxy", "_xserverdocs", "nobody", "root",
-	}
-	
-	for _, sysUser := range macOSSystemUsers {
-		if username == sysUser {
-			return true
-		}
-	}
-	return false
-}
+
+
+
+
 
 // parsePasswdOutput 解析passwd输出
 func parsePasswdOutput(output []byte) ([]UserInfo, error) {
@@ -443,8 +327,8 @@ func parsePasswdOutput(output []byte) ([]UserInfo, error) {
 			continue
 		}
 		
-		if isSystemUser(username) {
-			log.Printf("[USER API] Skipping known system user: %s", username)
+		if isSystemUser(username, uid) {
+			log.Printf("[USER API] Skipping known system user: %s (UID: %d)", username, uid)
 			continue
 		}
 		
@@ -470,9 +354,9 @@ func parsePasswdOutput(output []byte) ([]UserInfo, error) {
 	return users, nil
 }
 
-// createSystemUser 创建系统用户
+// createSystemUser 创建系统用户 (Rocky Linux 9.6)
 func createSystemUser(username, password, group string) error {
-	log.Printf("[USER API] Creating user: %s with group: %s on %s", username, group, runtime.GOOS)
+	log.Printf("[USER API] Creating user: %s with group: %s on Rocky Linux", username, group)
 	
 	// 检查用户是否已存在
 	if _, err := user.Lookup(username); err == nil {
@@ -480,11 +364,7 @@ func createSystemUser(username, password, group string) error {
 		return fmt.Errorf("user %s already exists", username)
 	}
 	
-	if runtime.GOOS == "darwin" {
-		return createMacOSUser(username, password, group)
-	} else {
-		return createLinuxUser(username, password, group)
-	}
+	return createLinuxUser(username, password, group)
 }
 
 // createLinuxUser 创建Linux用户
@@ -525,28 +405,29 @@ func createLinuxUser(username, password, group string) error {
 	return changeUserPassword(username, password)
 }
 
-// createMacOSUser 创建macOS用户
-func createMacOSUser(username, password, group string) error {
-	log.Printf("[USER API] Creating macOS user: %s", username)
-	
-	// 在macOS上，用户创建功能受限，通常需要管理员权限
-	// 这里提供一个基本的实现，但在生产环境中可能需要更复杂的处理
-	return fmt.Errorf("user creation is not supported on macOS in this demo version. Please use System Preferences to create users manually")
-}
+
 
 // deleteSystemUser 删除系统用户
 func deleteSystemUser(username string) error {
 	log.Printf("[USER API] Deleting user: %s", username)
 	
-	// 检查用户是否存在
-	if _, err := user.Lookup(username); err != nil {
-		log.Printf("[USER API] User %s does not exist", username)
+	// 检查用户是否存在并获取用户信息
+	userInfo, err := user.Lookup(username)
+	if err != nil {
+		log.Printf("[USER API] User %s does not exist: %v", username, err)
 		return fmt.Errorf("user %s does not exist", username)
 	}
 	
+	// 获取UID用于系统用户检查
+	uid, err := strconv.Atoi(userInfo.Uid)
+	if err != nil {
+		log.Printf("[USER API] Failed to parse UID for user %s: %v", username, err)
+		return fmt.Errorf("invalid user UID for %s", username)
+	}
+	
 	// 检查是否为系统用户
-	if isSystemUser(username) {
-		log.Printf("[USER API] Attempted to delete system user: %s", username)
+	if isSystemUser(username, uid) {
+		log.Printf("[USER API] Attempted to delete system user: %s (UID: %d)", username, uid)
 		return fmt.Errorf("cannot delete system user: %s", username)
 	}
 	
@@ -650,53 +531,102 @@ func isValidUsername(username string) bool {
 	return matched && len(username) <= 32
 }
 
-// isSystemUser 检查是否为系统用户 - 适配Rocky Linux 9.6
-func isSystemUser(username string) bool {
-	// Rocky Linux 9.6 系统用户列表
+// isSystemUser 检查是否为Rocky Linux 9.6系统用户（增强错误处理）
+func isSystemUser(username string, uid int) bool {
+	log.Printf("[USER API] Checking if user %s (UID: %d) is a Rocky Linux 9.6 system user", username, uid)
+	
+	// Rocky Linux 9.6中，UID < 1000的用户通常是系统用户
+	if uid < 1000 {
+		log.Printf("[USER API] User %s is a system user (UID %d < 1000) on Rocky Linux 9.6", username, uid)
+		return true
+	}
+	
+	// Rocky Linux 9.6 完整系统用户列表
 	systemUsers := []string{
-		// 基础系统用户
+		// 核心系统用户
 		"root", "bin", "daemon", "adm", "lp", "sync", "shutdown", "halt",
 		"mail", "operator", "games", "ftp", "nobody", "systemd-network",
 		"dbus", "polkitd", "libstoragemgmt", "cockpit-ws", "cockpit-wsinstance",
 		"sssd", "chrony", "systemd-resolve", "tss", "systemd-coredump",
 		"systemd-oom", "clevis", "kmod", "systemd-timesync", "systemd-journal-remote",
+		"systemd-journal-upload", "systemd-journal-gateway", "systemd-bus-proxy",
 		
 		// 网络和安全相关
 		"sshd", "rpc", "rpcuser", "nfsnobody", "unbound", "named",
-		"dhcpd", "openvpn", "nm-openvpn", "nm-openconnect",
+		"dhcpd", "openvpn", "nm-openvpn", "nm-openconnect", "NetworkManager",
+		"firewalld", "iptables", "fail2ban", "denyhosts",
 		
 		// 数据库和Web服务
 		"mysql", "mariadb", "postgres", "postgresql", "redis", "mongodb",
-		"nginx", "apache", "httpd", "www-data", "lighttpd",
+		"nginx", "apache", "httpd", "www-data", "lighttpd", "tomcat",
+		"jetty", "glassfish", "wildfly", "jboss",
 		
 		// 容器和虚拟化
 		"docker", "podman", "libvirt", "qemu", "kvm", "virt",
-		"containers", "crio", "kubernetes",
+		"containers", "crio", "kubernetes", "k8s", "openshift",
 		
 		// 监控和日志
 		"zabbix", "nagios", "prometheus", "grafana", "elasticsearch",
-		"logstash", "kibana", "fluentd", "rsyslog", "syslog",
+		"logstash", "kibana", "fluentd", "rsyslog", "syslog", "journald",
+		"collectd", "telegraf", "influxdb", "chronograf", "kapacitor",
 		
-		// HPC和科学计算相关
-		"slurm", "munge", "condor", "torque", "pbs", "sge",
-		"openmpi", "mpich", "intel", "cuda", "nvidia",
+		// HPC和科学计算相关（Rocky Linux常用于HPC环境）
+		"slurm", "munge", "condor", "torque", "pbs", "sge", "lsf",
+		"openmpi", "mpich", "intel", "cuda", "nvidia", "amd",
+		"ganglia", "lustre", "beegfs", "gpfs", "ceph", "gluster",
+		
+		// 邮件服务
+		"postfix", "dovecot", "exim", "sendmail", "cyrus", "courier",
+		"amavis", "clamav", "spamassassin", "milter",
+		
+		// 目录服务和认证
+		"ldap", "openldap", "samba", "winbind", "krb5", "kerberos",
+		"freeipa", "389ds", "dirsrv", "radiusd", "freeradius",
 		
 		// 其他常见服务
-		"postfix", "dovecot", "exim", "sendmail", "bind", "ntp",
-		"snmp", "ldap", "openldap", "samba", "winbind", "avahi",
-		"cups", "lpadmin", "gdm", "lightdm", "xdm", "pulse", "rtkit",
-		"colord", "geoclue", "flatpak", "packagekit", "usbmuxd",
-		"tcpdump", "wireshark", "pcap", "nmap",
+		"bind", "ntp", "snmp", "avahi", "cups", "lpadmin",
+		"gdm", "lightdm", "xdm", "pulse", "rtkit", "colord",
+		"geoclue", "flatpak", "packagekit", "usbmuxd", "bluetooth",
+		"tcpdump", "wireshark", "pcap", "nmap", "mrtg", "cacti",
+		
+		// 备份和存储
+		"bacula", "amanda", "rsync", "rsyncd", "nfs", "smb", "cifs",
+		"iscsi", "multipath", "lvm", "mdadm",
+		
+		// 开发和构建工具
+		"git", "svn", "cvs", "jenkins", "gitlab", "nexus", "artifactory",
+		"maven", "gradle", "ant", "make", "cmake", "autotools",
 	}
 	
-	log.Printf("[USER API] Checking if %s is a system user...", username)
 	for _, sysUser := range systemUsers {
 		if username == sysUser {
-			log.Printf("[USER API] %s is identified as a system user", username)
+			log.Printf("[USER API] User %s is identified as a known Rocky Linux 9.6 system user", username)
 			return true
 		}
 	}
 	
-	log.Printf("[USER API] %s is not a system user", username)
+	// 检查系统用户命名模式（Rocky Linux特有）
+	if strings.HasPrefix(username, "systemd-") {
+		log.Printf("[USER API] User %s matches systemd service user pattern", username)
+		return true
+	}
+	
+	if strings.HasPrefix(username, "_") {
+		log.Printf("[USER API] User %s matches underscore system user pattern", username)
+		return true
+	}
+	
+	if strings.HasSuffix(username, "$") {
+		log.Printf("[USER API] User %s matches machine account pattern", username)
+		return true
+	}
+	
+	// 检查是否为服务账户模式
+	if strings.Contains(username, "svc-") || strings.Contains(username, "service-") {
+		log.Printf("[USER API] User %s matches service account pattern", username)
+		return true
+	}
+	
+	log.Printf("[USER API] User %s is not a system user on Rocky Linux 9.6", username)
 	return false
 }
