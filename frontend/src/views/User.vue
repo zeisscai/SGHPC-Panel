@@ -63,13 +63,9 @@
                     required
                   ></v-text-field>
                   <v-text-field
-                    v-model="newUser.email"
-                    label="Email"
-                    type="email"
-                  ></v-text-field>
-                  <v-text-field
-                    v-model="newUser.fullName"
-                    label="Full Name"
+                    v-model="newUser.group"
+                    label="Group"
+                    placeholder="Leave empty for default group"
                   ></v-text-field>
                 </v-card-text>
                 <v-card-actions>
@@ -166,8 +162,7 @@ const generatedKey = ref(false)
 const newUser = ref({
   username: '',
   password: '',
-  email: '',
-  fullName: ''
+  group: ''
 })
 
 const newPassword = ref('')
@@ -178,8 +173,9 @@ const keyComment = ref('')
 // 表格头部定义
 const userHeaders = [
   { title: 'Username', key: 'username', sortable: true },
-  { title: 'Email', key: 'email', sortable: false },
-  { title: 'Full Name', key: 'fullName', sortable: true },
+  { title: 'UID', key: 'uid', sortable: true },
+  { title: 'Group', key: 'group', sortable: true },
+  { title: 'Home Directory', key: 'homeDir', sortable: false },
   { title: 'Actions', key: 'actions', sortable: false, width: '200px' }
 ]
 
@@ -199,19 +195,7 @@ const loadUsers = async () => {
     userItems.value = response.data.users || []
   } catch (error) {
     console.error('加载用户列表失败:', error)
-    // 模拟数据用于演示
-    userItems.value = [
-      {
-        username: 'admin',
-        email: 'admin@example.com',
-        fullName: 'Administrator'
-      },
-      {
-        username: 'user1',
-        email: 'user1@example.com',
-        fullName: 'User One'
-      }
-    ]
+    userItems.value = []
   } finally {
     loading.value = false
   }
@@ -227,8 +211,7 @@ const addUser = () => {
   newUser.value = {
     username: '',
     password: '',
-    email: '',
-    fullName: ''
+    group: ''
   }
   addUserDialog.value = true
 }

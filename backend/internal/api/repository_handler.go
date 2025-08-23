@@ -331,12 +331,12 @@ func backupRepoFiles(sourceDir, backupDir string) error {
 	for _, file := range files {
 		basename := filepath.Base(file)
 		backupPath := filepath.Join(backupDir, basename)
-		
+
 		data, err := ioutil.ReadFile(file)
 		if err != nil {
 			return err
 		}
-		
+
 		if err := ioutil.WriteFile(backupPath, data, 0644); err != nil {
 			return err
 		}

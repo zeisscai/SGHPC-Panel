@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"net/http"
+	"strings"
 
 	"panel-tool/internal/api"
 	"panel-tool/internal/services"
@@ -11,21 +12,21 @@ import (
 func main() {
 	// 初始化认证服务
 	authService := services.NewAuthService()
-	
+
 	// 设置路由
 	http.HandleFunc("/api/management-node", api.HandleGetManagementNode)
 	http.HandleFunc("/api/compute-nodes", api.HandleGetComputeNodes)
 	http.HandleFunc("/api/slurm-jobs", api.HandleGetSlurmJobs)
-	
+
 	// 传递认证服务给登录处理函数
 	http.HandleFunc("/api/login", func(w http.ResponseWriter, r *http.Request) {
 		api.HandleLogin(w, r, authService)
 	})
-	
+
 	http.HandleFunc("/api/change-password", func(w http.ResponseWriter, r *http.Request) {
 		api.HandleChangePassword(w, r, authService)
 	})
-	
+
 	// 文件管理相关路由
 	http.HandleFunc("/api/file/upload", api.HandleFileUpload)
 	http.HandleFunc("/api/file/download", api.HandleFileDownload)
@@ -34,7 +35,7 @@ func main() {
 	http.HandleFunc("/api/file/permissions", api.HandleFilePermissions)
 	http.HandleFunc("/api/file/mkdir", api.HandleFileMkdir)
 	http.HandleFunc("/api/file/rename", api.HandleFileRename)
-	
+
 	// Spack 相关路由
 	http.HandleFunc("/api/spack/status", api.HandleGetSpackStatus)
 	http.HandleFunc("/api/spack/installation-status", api.HandleGetSpackInstallationStatus)
@@ -47,20 +48,42 @@ func main() {
 	http.HandleFunc("/api/spack/repositories/update", api.HandleSetRepositories)
 	http.HandleFunc("/api/spack/install/logs", api.HandleSpackInstallLogs)
 	http.HandleFunc("/api/spack/package/install/logs", api.HandlePackageInstallLogs)
-	
+
 	// 软件源管理相关路由
 	http.HandleFunc("/api/repository/cache/clean", api.HandleCleanRepositoryCache)
 	http.HandleFunc("/api/repository/switch", api.HandleSwitchRepository)
 	http.HandleFunc("/api/repository/status", api.HandleGetRepositoryStatus)
 	http.HandleFunc("/api/repository/custom", api.HandleSetCustomRepository)
 	http.HandleFunc("/api/repository/test", api.HandleTestRepository)
-	
+
+	// 用户管理相关路由
+	http.HandleFunc("/api/users", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			api.HandleGetUsers(w, r)
+		} else if r.Method == http.MethodPost {
+			api.HandleCreateUser(w, r)
+		} else {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	http.HandleFunc("/api/users/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			api.HandleDeleteUser(w, r)
+		} else if r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/password") {
+			api.HandleChangeUserPassword(w, r)
+		} else if r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/generate-key") {
+			api.HandleGenerateSSHKey(w, r)
+		} else {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+
 	// WebSocket终端路由
 	http.HandleFunc("/api/ws", api.HandleWebSocket)
-	
+
 	// 提供静态文件服务
 	http.Handle("/", http.FileServer(http.Dir("./frontend/dist/")))
-	
+
 	// 启动服务器
 	log.Println("Server starting on :8080")
 	err := http.ListenAndServe(":8080", nil)
