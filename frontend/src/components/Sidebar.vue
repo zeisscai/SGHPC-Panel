@@ -128,6 +128,24 @@
             location="right"
           >User</v-tooltip>
         </v-list-item>
+        
+        <v-list-item
+          link
+          to="/system/repository"
+          :active="$route.path === '/system/repository'"
+          class="submenu-item"
+          :ripple="false"
+        >
+          <template v-slot:prepend>
+            <v-icon size="small" class="submenu-icon">mdi-source-repository</v-icon>
+          </template>
+          <v-list-item-title v-if="!isRail">Repository</v-list-item-title>
+          <v-tooltip
+            v-if="isRail"
+            activator="parent"
+            location="right"
+          >Repository</v-tooltip>
+        </v-list-item>
       </v-list-group>
     </v-list>
     

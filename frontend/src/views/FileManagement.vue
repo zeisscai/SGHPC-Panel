@@ -1,19 +1,12 @@
 <template>
-  <div class="file-management" @dragover.prevent="onDragOver" @drop.prevent="onDrop" @dragleave.prevent="onDragLeave">
+  <v-container fluid class="pa-6" @dragover.prevent="onDragOver" @drop.prevent="onDrop" @dragleave.prevent="onDragLeave">
     <v-row>
       <v-col cols="12">
-        <v-card class="mb-6" elevation="4">
-          <v-card-title class="text-h4 font-weight-bold">
-            <v-icon left class="mr-2 file-icon">mdi-file-document-multiple</v-icon>
+        <v-card elevation="2">
+          <v-card-title>
+            <v-icon left style="background: transparent;">mdi-file-document-multiple</v-icon>
             Files
           </v-card-title>
-        </v-card>
-      </v-col>
-    </v-row>
-    
-    <v-row>
-      <v-col cols="12">
-        <v-card class="mb-6" elevation="2" transition="slide-y-reverse-transition">
           <v-card-text>
             <div class="d-flex justify-space-between mb-4">
               <div>
@@ -214,9 +207,7 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
-    
-
-  </div>
+  </v-container>
 </template>
 
 <script>

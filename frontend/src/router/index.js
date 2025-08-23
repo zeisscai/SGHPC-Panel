@@ -5,6 +5,7 @@ import FileManagement from '../views/FileManagement.vue'
 import Login from '../views/Login.vue'
 import Spack from '../views/Spack.vue'
 import User from '../views/User.vue'
+import RepositoryManagement from '../views/RepositoryManagement.vue'
 
 const routes = [
   {
@@ -41,6 +42,12 @@ const routes = [
     path: '/system/user',
     name: 'User',
     component: User,
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/system/repository',
+    name: 'RepositoryManagement',
+    component: RepositoryManagement,
     meta: { requiresAuth: true }
   }
 ]

@@ -1,19 +1,12 @@
 <template>
-  <div class="user-management">
+  <v-container fluid class="pa-6">
     <v-row>
       <v-col cols="12">
-        <v-card class="mb-6" elevation="4">
-          <v-card-title class="text-h4 font-weight-bold">
-            <v-icon left class="mr-2 user-icon">mdi-account-multiple</v-icon>
+        <v-card elevation="2">
+          <v-card-title>
+            <v-icon left style="background: transparent;">mdi-account-multiple</v-icon>
             User
           </v-card-title>
-        </v-card>
-      </v-col>
-    </v-row>
-    
-    <v-row>
-      <v-col cols="12">
-        <v-card class="mb-6" elevation="2" transition="slide-y-reverse-transition">
           <v-card-text>
             <div class="d-flex justify-space-between mb-4">
               <div>
@@ -25,171 +18,131 @@
                   <v-icon left>mdi-refresh</v-icon>
                   Refresh
                 </v-btn>
-                <v-btn color="warning" @click="generateKeysForSelected" :disabled="selected.length === 0" class="mr-2">
+                <v-btn color="warning" @click="generateKey" :disabled="!selected.length" class="mr-2">
                   <v-icon left>mdi-key</v-icon>
-                  Generate Keys
+                  Generate SSH Key
                 </v-btn>
-                <v-btn color="error" @click="deleteSelected" :disabled="selected.length === 0">
-                  <v-icon left>mdi-delete-sweep</v-icon>
+                <v-btn color="error" @click="deleteUsers" :disabled="!selected.length">
+                  <v-icon left>mdi-delete</v-icon>
                   Delete Selected
                 </v-btn>
               </div>
             </div>
-            
+
             <v-data-table
+              v-model="selected"
               :headers="userHeaders"
               :items="userItems"
               :loading="loading"
-              :items-per-page="15"
-              class="elevation-1"
-              density="compact"
-              item-key="username"
               show-select
-              v-model="selected"
+              class="elevation-1"
             >
-              <template v-slot:item.sudo="{ item }">
-                <v-chip
-                  :color="item.sudo ? 'success' : 'default'"
-                  :text-color="item.sudo ? 'white' : 'black'"
-                  small
-                >
-                  {{ item.sudo ? 'Yes' : 'No' }}
-                </v-chip>
-              </template>
-              <template v-slot:item.status="{ item }">
-                <v-chip
-                  :color="item.status === 'active' ? 'success' : 'error'"
-                  :text-color="'white'"
-                  small
-                >
-                  {{ item.status === 'active' ? 'Active' : 'Disabled' }}
-                </v-chip>
-              </template>
               <template v-slot:item.actions="{ item }">
-                <v-btn icon @click="changePassword(item)" class="mr-1" size="small">
-                  <v-icon small>mdi-lock-reset</v-icon>
-                </v-btn>
-                <v-btn icon @click="generateKey(item)" class="mr-1" size="small">
-                  <v-icon small>mdi-key</v-icon>
-                </v-btn>
-                <v-btn 
-                  icon 
-                  @click="toggleUserStatus(item)" 
-                  class="mr-1" 
-                  size="small"
-                  :color="item.status === 'active' ? 'warning' : 'success'"
-                >
-                  <v-icon small>{{ item.status === 'active' ? 'mdi-account-off' : 'mdi-account-check' }}</v-icon>
-                </v-btn>
-                <v-btn icon @click="deleteUser(item)" size="small" color="error">
-                  <v-icon small>mdi-delete</v-icon>
+                <v-btn icon size="small" @click="changePassword(item)">
+                  <v-icon>mdi-lock-reset</v-icon>
                 </v-btn>
               </template>
             </v-data-table>
+
+            <!-- Add User Dialog -->
+            <v-dialog v-model="addUserDialog" max-width="500px">
+              <v-card>
+                <v-card-title>
+                  <span class="text-h5">Add New User</span>
+                </v-card-title>
+                <v-card-text>
+                  <v-text-field
+                    v-model="newUser.username"
+                    label="Username"
+                    required
+                  ></v-text-field>
+                  <v-text-field
+                    v-model="newUser.password"
+                    label="Password"
+                    type="password"
+                    required
+                  ></v-text-field>
+                  <v-text-field
+                    v-model="newUser.email"
+                    label="Email"
+                    type="email"
+                  ></v-text-field>
+                  <v-text-field
+                    v-model="newUser.fullName"
+                    label="Full Name"
+                  ></v-text-field>
+                </v-card-text>
+                <v-card-actions>
+                  <v-spacer></v-spacer>
+                  <v-btn color="blue darken-1" text @click="addUserDialog = false">Cancel</v-btn>
+                  <v-btn color="blue darken-1" text @click="confirmAddUser" :loading="addingUser">Add User</v-btn>
+                </v-card-actions>
+              </v-card>
+            </v-dialog>
+
+            <!-- Change Password Dialog -->
+            <v-dialog v-model="passwordDialog" max-width="500px">
+              <v-card>
+                <v-card-title>
+                  <span class="text-h5">Change Password for {{ selectedUser?.username }}</span>
+                </v-card-title>
+                <v-card-text>
+                  <v-text-field
+                    v-model="newPassword"
+                    label="New Password"
+                    type="password"
+                    required
+                  ></v-text-field>
+                  <v-text-field
+                    v-model="confirmPassword"
+                    label="Confirm Password"
+                    type="password"
+                    required
+                  ></v-text-field>
+                </v-card-text>
+                <v-card-actions>
+                  <v-spacer></v-spacer>
+                  <v-btn color="blue darken-1" text @click="passwordDialog = false">Cancel</v-btn>
+                  <v-btn color="blue darken-1" text @click="confirmPasswordChange" :loading="changingPassword">Change Password</v-btn>
+                </v-card-actions>
+              </v-card>
+            </v-dialog>
+            
+            <!-- Generate Key Dialog -->
+            <v-dialog v-model="keyDialog" max-width="600px">
+              <v-card>
+                <v-card-title>
+                  <span class="text-h5">Generate SSH Key for {{ selectedUser?.username }}</span>
+                </v-card-title>
+                <v-card-text>
+                  <v-select
+                    v-model="keyType"
+                    :items="keyTypes"
+                    label="Key Type"
+                    required
+                  ></v-select>
+                  <v-text-field
+                    v-model="keyComment"
+                    label="Comment (optional)"
+                    placeholder="user@hostname"
+                  ></v-text-field>
+                  <v-alert v-if="generatedKey" type="success" class="mt-3">
+                    <strong>Key generated successfully!</strong><br>
+                    <small>The private key has been saved to the user's home directory.</small>
+                  </v-alert>
+                </v-card-text>
+                <v-card-actions>
+                  <v-spacer></v-spacer>
+                  <v-btn color="blue darken-1" text @click="keyDialog = false">Close</v-btn>
+                  <v-btn color="blue darken-1" text @click="confirmGenerateKey" :loading="generatingKey">Generate Key</v-btn>
+                </v-card-actions>
+              </v-card>
+            </v-dialog>
           </v-card-text>
         </v-card>
       </v-col>
     </v-row>
-    
-    <!-- Add User Dialog -->
-    <v-dialog v-model="addUserDialog" max-width="500px">
-      <v-card>
-        <v-card-title>
-          <span class="text-h5">Add New User</span>
-        </v-card-title>
-        <v-card-text>
-          <v-text-field
-            v-model="newUser.username"
-            label="Username"
-            required
-            :rules="[rules.required]"
-          ></v-text-field>
-          <v-text-field
-            v-model="newUser.password"
-            label="Password"
-            type="password"
-            required
-            :rules="[rules.required]"
-          ></v-text-field>
-          <v-text-field
-            v-model="newUser.groups"
-            label="Groups (comma separated)"
-            placeholder="users,developers"
-          ></v-text-field>
-          <v-checkbox
-            v-model="newUser.sudo"
-            label="Grant sudo privileges"
-          ></v-checkbox>
-        </v-card-text>
-        <v-card-actions>
-          <v-spacer></v-spacer>
-          <v-btn color="blue darken-1" text @click="addUserDialog = false">Cancel</v-btn>
-          <v-btn color="blue darken-1" text @click="confirmAddUser" :loading="addingUser">Add User</v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
-    
-    <!-- Change Password Dialog -->
-    <v-dialog v-model="passwordDialog" max-width="500px">
-      <v-card>
-        <v-card-title>
-          <span class="text-h5">Change Password for {{ selectedUser?.username }}</span>
-        </v-card-title>
-        <v-card-text>
-          <v-text-field
-            v-model="newPassword"
-            label="New Password"
-            type="password"
-            required
-            :rules="[rules.required]"
-          ></v-text-field>
-          <v-text-field
-            v-model="confirmPassword"
-            label="Confirm Password"
-            type="password"
-            required
-            :rules="[rules.required, rules.passwordMatch]"
-          ></v-text-field>
-        </v-card-text>
-        <v-card-actions>
-          <v-spacer></v-spacer>
-          <v-btn color="blue darken-1" text @click="passwordDialog = false">Cancel</v-btn>
-          <v-btn color="blue darken-1" text @click="confirmPasswordChange" :loading="changingPassword">Change Password</v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
-    
-    <!-- Generate Key Dialog -->
-    <v-dialog v-model="keyDialog" max-width="600px">
-      <v-card>
-        <v-card-title>
-          <span class="text-h5">Generate SSH Key for {{ selectedUser?.username }}</span>
-        </v-card-title>
-        <v-card-text>
-          <v-select
-            v-model="keyType"
-            :items="keyTypes"
-            label="Key Type"
-            required
-          ></v-select>
-          <v-text-field
-            v-model="keyComment"
-            label="Comment (optional)"
-            placeholder="user@hostname"
-          ></v-text-field>
-          <v-alert v-if="generatedKey" type="success" class="mt-3">
-            <strong>Key generated successfully!</strong><br>
-            <small>The private key has been saved to the user's home directory.</small>
-          </v-alert>
-        </v-card-text>
-        <v-card-actions>
-          <v-spacer></v-spacer>
-          <v-btn color="blue darken-1" text @click="keyDialog = false">Close</v-btn>
-          <v-btn color="blue darken-1" text @click="confirmGenerateKey" :loading="generatingKey">Generate Key</v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
-  </div>
+  </v-container>
 </template>
 
 <script setup>
@@ -213,8 +166,8 @@ const generatedKey = ref(false)
 const newUser = ref({
   username: '',
   password: '',
-  groups: '',
-  sudo: false
+  email: '',
+  fullName: ''
 })
 
 const newPassword = ref('')
@@ -225,10 +178,8 @@ const keyComment = ref('')
 // 表格头部定义
 const userHeaders = [
   { title: 'Username', key: 'username', sortable: true },
-  { title: 'Groups', key: 'groups', sortable: false },
-  { title: 'Sudo', key: 'sudo', sortable: true },
-  { title: 'Status', key: 'status', sortable: true },
-  { title: 'Last Login', key: 'lastLogin', sortable: true },
+  { title: 'Email', key: 'email', sortable: false },
+  { title: 'Full Name', key: 'fullName', sortable: true },
   { title: 'Actions', key: 'actions', sortable: false, width: '200px' }
 ]
 
@@ -239,12 +190,6 @@ const keyTypes = [
   { title: 'ED25519', value: 'ed25519' },
   { title: 'ECDSA', value: 'ecdsa' }
 ]
-
-// 表单验证规则
-const rules = {
-  required: value => !!value || 'This field is required',
-  passwordMatch: value => value === newPassword.value || 'Passwords do not match'
-}
 
 // 加载用户列表
 const loadUsers = async () => {
@@ -258,24 +203,13 @@ const loadUsers = async () => {
     userItems.value = [
       {
         username: 'admin',
-        groups: 'wheel,sudo',
-        sudo: true,
-        status: 'active',
-        lastLogin: '2024-01-15 10:30:00'
+        email: 'admin@example.com',
+        fullName: 'Administrator'
       },
       {
         username: 'user1',
-        groups: 'users',
-        sudo: false,
-        status: 'active',
-        lastLogin: '2024-01-14 15:20:00'
-      },
-      {
-        username: 'testuser',
-        groups: 'users,developers',
-        sudo: false,
-        status: 'disabled',
-        lastLogin: '2024-01-10 09:15:00'
+        email: 'user1@example.com',
+        fullName: 'User One'
       }
     ]
   } finally {
@@ -293,8 +227,8 @@ const addUser = () => {
   newUser.value = {
     username: '',
     password: '',
-    groups: '',
-    sudo: false
+    email: '',
+    fullName: ''
   }
   addUserDialog.value = true
 }
@@ -335,10 +269,6 @@ const confirmPasswordChange = async () => {
     return
   }
   
-  if (!confirm(`确定要修改用户 ${selectedUser.value.username} 的密码吗？`)) {
-    return
-  }
-  
   changingPassword.value = true
   try {
     await axios.put(`/api/users/${selectedUser.value.username}/password`, {
@@ -355,10 +285,14 @@ const confirmPasswordChange = async () => {
 }
 
 // 生成密钥
-const generateKey = (user) => {
-  selectedUser.value = user
+const generateKey = () => {
+  if (selected.value.length === 0) {
+    alert('请先选择用户')
+    return
+  }
+  selectedUser.value = selected.value[0]
   keyType.value = 'rsa'
-  keyComment.value = `${user.username}@hostname`
+  keyComment.value = `${selectedUser.value.username}@hostname`
   generatedKey.value = false
   keyDialog.value = true
 }
@@ -381,44 +315,8 @@ const confirmGenerateKey = async () => {
   }
 }
 
-// 切换用户状态
-const toggleUserStatus = async (user) => {
-  const action = user.status === 'active' ? '停用' : '启用'
-  if (!confirm(`确定要${action}用户 ${user.username} 吗？`)) {
-    return
-  }
-  
-  try {
-    const newStatus = user.status === 'active' ? 'disabled' : 'active'
-    await axios.put(`/api/users/${user.username}/status`, {
-      status: newStatus
-    })
-    user.status = newStatus
-    alert(`用户${action}成功`)
-  } catch (error) {
-    console.error(`${action}用户失败:`, error)
-    alert(`${action}用户失败: ` + (error.response?.data?.message || error.message))
-  }
-}
-
-// 删除用户
-const deleteUser = async (user) => {
-  if (!confirm(`确定要删除用户 ${user.username} 吗？此操作不可撤销！`)) {
-    return
-  }
-  
-  try {
-    await axios.delete(`/api/users/${user.username}`)
-    refreshUsers()
-    alert('用户删除成功')
-  } catch (error) {
-    console.error('删除用户失败:', error)
-    alert('删除用户失败: ' + (error.response?.data?.message || error.message))
-  }
-}
-
 // 删除选中的用户
-const deleteSelected = async () => {
+const deleteUsers = async () => {
   if (selected.value.length === 0) return
   
   if (!confirm(`确定要删除选中的 ${selected.value.length} 个用户吗？此操作不可撤销！`)) {
@@ -443,34 +341,6 @@ const deleteSelected = async () => {
   alert(`删除完成: ${successCount} 个成功, ${failCount} 个失败`)
 }
 
-// 为选中用户生成密钥
-const generateKeysForSelected = async () => {
-  if (selected.value.length === 0) return
-  
-  if (!confirm(`确定要为选中的 ${selected.value.length} 个用户生成SSH密钥吗？`)) {
-    return
-  }
-  
-  let successCount = 0
-  let failCount = 0
-  
-  for (const user of selected.value) {
-    try {
-      await axios.post(`/api/users/${user.username}/generate-key`, {
-        type: 'rsa',
-        comment: `${user.username}@hostname`
-      })
-      successCount++
-    } catch (error) {
-      console.error(`为用户 ${user.username} 生成密钥失败:`, error)
-      failCount++
-    }
-  }
-  
-  selected.value = []
-  alert(`密钥生成完成: ${successCount} 个成功, ${failCount} 个失败`)
-}
-
 // 组件挂载时加载数据
 onMounted(() => {
   loadUsers()
@@ -478,27 +348,6 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.user-management {
-  padding: 20px;
-}
-
-.user-icon {
-  color: #1976d2;
-  background-color: transparent !important;
-}
-
-.v-card {
-  border-radius: 8px;
-}
-
-.v-btn {
-  text-transform: none;
-}
-
-.v-chip {
-  font-weight: 500;
-}
-
 .v-icon {
   background-color: transparent !important;
 }

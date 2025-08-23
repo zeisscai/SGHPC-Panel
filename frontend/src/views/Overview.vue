@@ -1,160 +1,166 @@
 <template>
-  <div class="overview">
+  <v-container fluid>
     <v-row>
       <v-col cols="12">
-        <v-card class="mb-6" elevation="4">
-          <v-card-title class="text-h4 font-weight-bold">
-            Status Overview
-          </v-card-title>
-        </v-card>
-      </v-col>
-    </v-row>
-    
-    <v-row>
-      <v-col cols="12">
-        <v-card class="mb-6" elevation="2" transition="slide-y-transition">
+        <v-card elevation="2">
           <v-card-title>
-            <v-icon left class="mr-2 overview-icon">mdi-server</v-icon>
-            Management Node Information
+            <v-icon left style="background: transparent;">mdi-chart-line</v-icon>
+            Overview
           </v-card-title>
+          
           <v-card-text>
-            <v-table v-if="managementNode" density="comfortable">
-              <tbody>
-                <tr>
-                  <td class="font-weight-bold">Hostname</td>
-                  <td>{{ managementNode.hostname }}</td>
-                </tr>
-                <tr>
-                  <td class="font-weight-bold">Model</td>
-                  <td>{{ managementNode.model }}</td>
-                </tr>
-                <tr>
-                  <td class="font-weight-bold">Architecture</td>
-                  <td>{{ managementNode.architecture }}</td>
-                </tr>
-                <tr>
-                  <td class="font-weight-bold">CPU Information</td>
-                  <td>{{ managementNode.cpu_info }}</td>
-                </tr>
-                <tr>
-                  <td class="font-weight-bold">OS Version</td>
-                  <td>{{ managementNode.os_version }}</td>
-                </tr>
-                <tr>
-                  <td class="font-weight-bold">Kernel Version</td>
-                  <td>{{ managementNode.kernel_version }}</td>
-                </tr>
-                <tr>
-                  <td class="font-weight-bold">Local Time</td>
-                  <td>{{ managementNode.local_time }}</td>
-                </tr>
-                <tr>
-                  <td class="font-weight-bold">Uptime</td>
-                  <td>{{ managementNode.uptime }}</td>
-                </tr>
-              </tbody>
-            </v-table>
+            <!-- 管理节点信息 -->
+            <v-row class="mb-6">
+              <v-col cols="12">
+                <v-card outlined>
+                  <v-card-subtitle>
+                    <v-icon left class="mr-2" style="background: transparent;">mdi-server</v-icon>
+                    管理节点信息
+                  </v-card-subtitle>
+                  <v-card-text>
+                    <v-table v-if="managementNode" density="comfortable">
+                      <tbody>
+                        <tr>
+                          <td class="font-weight-bold">Hostname</td>
+                          <td>{{ managementNode.hostname }}</td>
+                        </tr>
+                        <tr>
+                          <td class="font-weight-bold">Model</td>
+                          <td>{{ managementNode.model }}</td>
+                        </tr>
+                        <tr>
+                          <td class="font-weight-bold">Architecture</td>
+                          <td>{{ managementNode.architecture }}</td>
+                        </tr>
+                        <tr>
+                          <td class="font-weight-bold">CPU Information</td>
+                          <td>{{ managementNode.cpu_info }}</td>
+                        </tr>
+                        <tr>
+                          <td class="font-weight-bold">OS Version</td>
+                          <td>{{ managementNode.os_version }}</td>
+                        </tr>
+                        <tr>
+                          <td class="font-weight-bold">Kernel Version</td>
+                          <td>{{ managementNode.kernel_version }}</td>
+                        </tr>
+                        <tr>
+                          <td class="font-weight-bold">Local Time</td>
+                          <td>{{ managementNode.local_time }}</td>
+                        </tr>
+                        <tr>
+                          <td class="font-weight-bold">Uptime</td>
+                          <td>{{ managementNode.uptime }}</td>
+                        </tr>
+                      </tbody>
+                    </v-table>
+                  </v-card-text>
+                </v-card>
+              </v-col>
+            </v-row>
+            
+            <!-- 计算节点信息 -->
+            <v-row class="mb-4">
+              <v-col cols="12">
+                <v-card outlined>
+                  <v-card-subtitle>
+                    <v-icon left class="mr-2 overview-icon">mdi-server-network</v-icon>
+                    计算节点
+                  </v-card-subtitle>
+                  <v-card-text>
+                    <v-alert v-if="nodeStatusMessage" type="warning" outlined>
+                      {{ nodeStatusMessage }}
+                    </v-alert>
+                    <v-data-table
+                      v-else
+                      :headers="nodeHeaders"
+                      :items="computeNodes"
+                      class="elevation-1"
+                      :loading="loadingNodes"
+                      hide-default-footer
+                    >
+                      <template v-slot:item.cpu_usage="{ item }">
+                        <v-chip 
+                          :color="getUsageColor(item.cpu_usage)" 
+                          dark
+                        >
+                          {{ Math.round(item.cpu_usage) }}%
+                        </v-chip>
+                      </template>
+                      <template v-slot:item.memory_usage="{ item }">
+                        <v-chip 
+                          :color="getUsageColor(item.memory_usage)" 
+                          dark
+                        >
+                          {{ (item.memory_usage * 0.16).toFixed(1) }}GB/16GB
+                        </v-chip>
+                      </template>
+                      <template v-slot:item.status="{ item }">
+                        <v-chip 
+                          :color="getStatusColor(item.status)" 
+                          dark
+                        >
+                          {{ item.status }}
+                        </v-chip>
+                      </template>
+                    </v-data-table>
+                  </v-card-text>
+                </v-card>
+              </v-col>
+            </v-row>
+            
+            <!-- SLURM作业信息 -->
+            <v-row class="mb-4">
+              <v-col cols="12">
+                <v-card outlined>
+                  <v-card-subtitle>
+                    <v-icon left class="mr-2 overview-icon">mdi-format-list-bulleted</v-icon>
+                    SLURM作业
+                  </v-card-subtitle>
+                  <v-card-actions>
+                    <v-btn 
+                      color="primary" 
+                      @click="reloadData"
+                      :loading="loadingNodes || loadingJobs"
+                      :disabled="loadingNodes || loadingJobs"
+                    >
+                      <v-icon left>mdi-refresh</v-icon>
+                      刷新数据
+                    </v-btn>
+                  </v-card-actions>
+                  <v-card-text>
+                    <v-alert v-if="jobStatusMessage" type="warning" outlined>
+                      {{ jobStatusMessage }}
+                    </v-alert>
+                    <v-data-table
+                      v-else
+                      :headers="jobHeaders"
+                      :items="activeJobs"
+                      class="elevation-1"
+                      :loading="loadingJobs"
+                      hide-default-footer
+                    >
+                      <template v-slot:item.submit_time="{ item }">
+                        {{ new Date(item.submit_time).toLocaleString() }}
+                      </template>
+                      <template v-slot:item.status="{ item }">
+                        <v-chip 
+                          :color="getStatusColor(item.status)" 
+                          dark
+                        >
+                          {{ item.status }}
+                        </v-chip>
+                      </template>
+                    </v-data-table>
+                  </v-card-text>
+                </v-card>
+              </v-col>
+            </v-row>
           </v-card-text>
         </v-card>
       </v-col>
     </v-row>
-    
-    <v-row>
-      <v-col cols="12">
-        <v-card class="mb-6" elevation="2" transition="slide-y-transition">
-          <v-card-title>
-            <v-icon left class="mr-2 overview-icon">mdi-server-network</v-icon>
-            Compute Nodes
-          </v-card-title>
-          <v-card-text>
-            <v-alert v-if="nodeStatusMessage" type="warning" outlined>
-              {{ nodeStatusMessage }}
-            </v-alert>
-            <v-data-table
-              v-else
-              :headers="nodeHeaders"
-              :items="computeNodes"
-              class="elevation-1"
-              :loading="loadingNodes"
-              hide-default-footer
-            >
-              <template v-slot:item.cpu_usage="{ item }">
-                <v-chip 
-                  :color="getUsageColor(item.cpu_usage)" 
-                  dark
-                >
-                  {{ Math.round(item.cpu_usage) }}%
-                </v-chip>
-              </template>
-              <template v-slot:item.memory_usage="{ item }">
-                <v-chip 
-                  :color="getUsageColor(item.memory_usage)" 
-                  dark
-                >
-                  {{ (item.memory_usage * 0.16).toFixed(1) }}GB/16GB
-                </v-chip>
-              </template>
-              <template v-slot:item.status="{ item }">
-                <v-chip 
-                  :color="getStatusColor(item.status)" 
-                  dark
-                >
-                  {{ item.status }}
-                </v-chip>
-              </template>
-            </v-data-table>
-          </v-card-text>
-        </v-card>
-      </v-col>
-    </v-row>
-    
-    <v-row>
-      <v-col cols="12">
-        <v-card class="mb-6" elevation="2" transition="slide-y-transition">
-          <v-card-title>
-            <v-icon left class="mr-2 overview-icon">mdi-format-list-bulleted</v-icon>
-            SLURM Jobs
-          </v-card-title>
-          <v-card-actions>
-            <v-btn 
-              color="primary" 
-              @click="reloadData"
-              :loading="loadingNodes || loadingJobs"
-              :disabled="loadingNodes || loadingJobs"
-            >
-              <v-icon left>mdi-refresh</v-icon>
-              Refresh Data
-            </v-btn>
-          </v-card-actions>
-          <v-card-text>
-            <v-alert v-if="jobStatusMessage" type="warning" outlined>
-              {{ jobStatusMessage }}
-            </v-alert>
-            <v-data-table
-              v-else
-              :headers="jobHeaders"
-              :items="activeJobs"
-              class="elevation-1"
-              :loading="loadingJobs"
-              hide-default-footer
-            >
-              <template v-slot:item.submit_time="{ item }">
-                {{ new Date(item.submit_time).toLocaleString() }}
-              </template>
-              <template v-slot:item.status="{ item }">
-                <v-chip 
-                  :color="getStatusColor(item.status)" 
-                  dark
-                >
-                  {{ item.status }}
-                </v-chip>
-              </template>
-            </v-data-table>
-          </v-card-text>
-        </v-card>
-      </v-col>
-    </v-row>
-  </div>
+  </v-container>
 </template>
 
 <script>

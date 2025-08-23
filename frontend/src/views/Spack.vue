@@ -1,11 +1,11 @@
 <template>
-  <div>
+  <v-container fluid class="pa-6">
     <v-row>
       <v-col cols="12">
-        <v-card class="mb-6" elevation="2">
+        <v-card elevation="2">
           <v-card-title>
-            <v-icon left class="mr-2">mdi-package-variant</v-icon>
-            Spack Package Manager
+            <v-icon left style="background: transparent;">mdi-package-variant</v-icon>
+            Spack
           </v-card-title>
           <v-card-text>
             <!-- Spack 安装状态检查 -->
@@ -257,7 +257,7 @@
         </v-card-actions>
       </v-card>
     </v-dialog>
-  </div>
+  </v-container>
 </template>
 
 <script>

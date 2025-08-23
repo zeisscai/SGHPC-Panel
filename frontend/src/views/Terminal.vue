@@ -1,19 +1,12 @@
 <template>
-  <div class="terminal">
+  <v-container fluid class="pa-6">
     <v-row>
       <v-col cols="12">
-        <v-card class="mb-6" elevation="4">
-          <v-card-title class="text-h4 font-weight-bold">
-            <v-icon left class="mr-2">mdi-console</v-icon>
-            Web Terminal
+        <v-card elevation="2">
+          <v-card-title>
+            <v-icon left style="background: transparent;">mdi-console</v-icon>
+            Terminal
           </v-card-title>
-        </v-card>
-      </v-col>
-    </v-row>
-    
-    <v-row>
-      <v-col cols="12">
-        <v-card class="mb-6" elevation="2">
           <v-card-text class="pa-0">
             <div class="terminal-toolbar">
               <div class="d-flex align-center">
@@ -84,15 +77,15 @@
               </div>
             </div>
             
-            <div 
-              ref="terminalContainer" 
-              class="terminal-container"
-            ></div>
-          </v-card-text>
-        </v-card>
-      </v-col>
-    </v-row>
-  </div>
+                    <div 
+                      ref="terminalContainer" 
+                      class="terminal-container"
+                    ></div>
+                  </v-card-text>
+                </v-card>
+              </v-col>
+            </v-row>
+  </v-container>
 </template>
 
 <script>

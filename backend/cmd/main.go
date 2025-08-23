@@ -48,6 +48,13 @@ func main() {
 	http.HandleFunc("/api/spack/install/logs", api.HandleSpackInstallLogs)
 	http.HandleFunc("/api/spack/package/install/logs", api.HandlePackageInstallLogs)
 	
+	// 软件源管理相关路由
+	http.HandleFunc("/api/repository/cache/clean", api.HandleCleanRepositoryCache)
+	http.HandleFunc("/api/repository/switch", api.HandleSwitchRepository)
+	http.HandleFunc("/api/repository/status", api.HandleGetRepositoryStatus)
+	http.HandleFunc("/api/repository/custom", api.HandleSetCustomRepository)
+	http.HandleFunc("/api/repository/test", api.HandleTestRepository)
+	
 	// WebSocket终端路由
 	http.HandleFunc("/api/ws", api.HandleWebSocket)
 	
